@@ -188,7 +188,20 @@ pub fn adapt_body(body: &mut Value, provider_id: &str) {
 /// OpenAI `response_format` structured output.
 const ANTHROPIC_STRUCTURED_TOOL: &str = "structured_output";
 
+/// Whether an OpenAI-compatible stream delta carries reasoning text.
+/// Providers name the field differently (`reasoning` on Cerebras and
+/// OpenRouter, `reasoning_content` on vLLM and DeepSeek).
+fn has_reasoning_delta(delta: &Value) -> bool {
+    ["reasoning", "reasoning_content"]
+        .iter()
+        .any(|k| delta[k].as_str().is_some_and(|t| !t.is_empty()))
+}
+
 /// One normalized streaming delta from any provider.
+///
+/// A delta with no `text` marks the first streamed reasoning, sent once
+/// per stream so the caller can time generation from its first token even
+/// when the reasoning itself is not shown.
 #[derive(Debug, Clone, Default)]
 pub struct ChatDelta {
     pub text: Option<String>,
@@ -200,6 +213,9 @@ pub struct ChatDelta {
 pub struct ChatUsage {
     pub prompt_tokens: i64,
     pub completion_tokens: i64,
+    /// Share of `completion_tokens` spent on reasoning, when the provider
+    /// reports it (`completion_tokens_details.reasoning_tokens`).
+    pub reasoning_tokens: i64,
 }
 
 /// One model id (+ optional friendly name) as reported by a provider's
@@ -276,6 +292,7 @@ pub async fn util_request(
                 ChatUsage {
                     prompt_tokens: p as i64,
                     completion_tokens: c as i64,
+                    ..ChatUsage::default()
                 },
             ))
         }
@@ -654,6 +671,7 @@ impl ChatProvider for OpenAiCompatibleProvider {
             ChatUsage {
                 prompt_tokens: prompt as i64,
                 completion_tokens: completion as i64,
+                ..ChatUsage::default()
             },
         ))
     }
@@ -698,6 +716,7 @@ impl ChatProvider for OpenAiCompatibleProvider {
 
         let mut framer = SseFramer::new(response.bytes_stream());
         let mut usage = ChatUsage::default();
+        let mut reasoning_signalled = false;
 
         // `None` is a stream closed without [DONE].
         while let Some(line) = framer.next_line(&self.id).await? {
@@ -713,6 +732,13 @@ impl ChatProvider for OpenAiCompatibleProvider {
                             .unwrap_or("unknown error")
                             .to_string();
                         return Err(msg);
+                    }
+
+                    if !reasoning_signalled && has_reasoning_delta(&parsed["choices"][0]["delta"]) {
+                        reasoning_signalled = true;
+                        if delta_tx.send(ChatDelta::default()).await.is_err() {
+                            return Err("delta receiver dropped".to_string());
+                        }
                     }
 
                     if let Some(text) = parsed["choices"][0]["delta"]["content"].as_str() {
@@ -735,6 +761,10 @@ impl ChatProvider for OpenAiCompatibleProvider {
                         if !u.is_null() {
                             usage.prompt_tokens = u["prompt_tokens"].as_i64().unwrap_or(0);
                             usage.completion_tokens = u["completion_tokens"].as_i64().unwrap_or(0);
+                            usage.reasoning_tokens = u
+                                .pointer("/completion_tokens_details/reasoning_tokens")
+                                .and_then(Value::as_i64)
+                                .unwrap_or(0);
                         }
                     }
                 }
@@ -934,6 +964,7 @@ impl ChatProvider for AnthropicProvider {
         let usage = ChatUsage {
             prompt_tokens: payload["usage"]["input_tokens"].as_i64().unwrap_or(0),
             completion_tokens: payload["usage"]["output_tokens"].as_i64().unwrap_or(0),
+            ..ChatUsage::default()
         };
         Ok((text, usage))
     }
@@ -972,6 +1003,7 @@ impl ChatProvider for AnthropicProvider {
 
         let mut framer = SseFramer::new(response.bytes_stream());
         let mut usage = ChatUsage::default();
+        let mut reasoning_signalled = false;
 
         while let Some(line) = framer.next_line(&self.id).await? {
             // Anthropic SSE interleaves `event: <type>` and
@@ -1007,6 +1039,16 @@ impl ChatProvider for AnthropicProvider {
                         {
                             return Err("delta receiver dropped".to_string());
                         }
+                    }
+                }
+                Some("content_block_delta")
+                    if !reasoning_signalled
+                        && parsed.pointer("/delta/type").and_then(|t| t.as_str())
+                            == Some("thinking_delta") =>
+                {
+                    reasoning_signalled = true;
+                    if delta_tx.send(ChatDelta::default()).await.is_err() {
+                        return Err("delta receiver dropped".to_string());
                     }
                 }
                 Some("message_delta") => {
@@ -1147,6 +1189,19 @@ fn base_url_override(id: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reasoning_delta_fields() {
+        assert!(has_reasoning_delta(
+            &serde_json::json!({"reasoning": "Let"})
+        ));
+        assert!(has_reasoning_delta(
+            &serde_json::json!({"reasoning_content": "Let"})
+        ));
+        assert!(!has_reasoning_delta(&serde_json::json!({"reasoning": ""})));
+        assert!(!has_reasoning_delta(&serde_json::json!({"content": "Hi"})));
+        assert!(!has_reasoning_delta(&Value::Null));
+    }
 
     #[test]
     fn catalog_variants_preserve_upstream_ids_and_choose_the_processing_tier() {

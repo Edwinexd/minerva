@@ -384,6 +384,26 @@ pub fn start_scheduler_loops(state: AppState) {
         });
     }
 
+    // Chat model latency samples feed the model picker's last-week
+    // medians; keep a month for looking back.
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            const SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+            loop {
+                if let Err(e) = minerva_db::queries::chat_model_latency::delete_older_than(
+                    &state.db,
+                    minerva_db::queries::chat_model_latency::RETENTION_DAYS,
+                )
+                .await
+                {
+                    tracing::error!("chat model latency: sweep failed: {}", e);
+                }
+                tokio::time::sleep(SWEEP_INTERVAL).await;
+            }
+        });
+    }
+
     // Credit transfer case retention: delete cases (conversations and
     // their attachment files) untouched for the workspace's retention
     // period. Hourly is plenty for a days-long period.

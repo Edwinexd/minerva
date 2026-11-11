@@ -602,6 +602,27 @@ describe("Authenticated pages a11y", () => {
         [queries.courseQuery(COURSE_ID).queryKey, course],
         [queries.courseKgTokenUsageQuery(COURSE_ID).queryKey, { since: "2026-01-01T00:00:00Z", rows: [] }],
         [queries.modelsQuery.queryKey, { models: [{ id: "llama-3.3-70b", name: "Llama 3.3 70B" }] }],
+        [
+          queries.chatModelsQuery.queryKey,
+          {
+            models: [
+              {
+                model: "llama-3.3-70b",
+                display_name: "Llama 3.3 70B",
+                provider: "cerebras",
+                input_usd_per_mtok: 0.35,
+                output_usd_per_mtok: 0.75,
+                speed: {
+                  samples: 42,
+                  window_days: 7,
+                  ttft_p50_ms: 1270,
+                  ttft_p90_ms: 1830,
+                  tokens_per_second_p50: 2164,
+                },
+              },
+            ],
+          },
+        ],
         [queries.embeddingModelsQuery.queryKey, { models: [{ model: "bge-small", dimensions: 384, benchmark: null }] }],
       ],
     )

@@ -301,6 +301,56 @@
           "legendFormat": "p95"
         }
       ]
+    },
+    {
+      "id": 15,
+      "type": "row",
+      "title": "Chat models (streamed answers)",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 40 },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Chat time to first token (p50/p90)",
+      "description": "histogram_quantile over chat_ttft_seconds_bucket, per model. Request to the first visible token, reasoning included, retrieval and tool use excluded. The teacher's model picker shows the same measure from chat_model_latency.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 41 },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "fillOpacity": 5, "lineWidth": 1, "showPoints": "auto" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum by (le, model) (rate(chat_ttft_seconds_bucket[1h])))",
+          "legendFormat": "{{model}} p50"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.90, sum by (le, model) (rate(chat_ttft_seconds_bucket[1h])))",
+          "legendFormat": "{{model}} p90"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Chat output tokens per second (p50)",
+      "description": "histogram_quantile over chat_output_tokens_per_second_bucket, per model. Output tokens over the window from the first generated token to the end of the stream; answers with a window under 50 ms are not recorded.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 41 },
+      "fieldConfig": { "defaults": { "unit": "none", "custom": { "drawStyle": "line", "fillOpacity": 5, "lineWidth": 1, "showPoints": "auto" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum by (le, model) (rate(chat_output_tokens_per_second_bucket[1h])))",
+          "legendFormat": "{{model}}"
+        }
+      ]
     }
   ]
 }

@@ -1,6 +1,7 @@
 pub mod api_keys;
 pub mod canvas;
 pub mod case_assessments;
+pub mod chat_model_latency;
 pub mod chat_models;
 pub mod conversation_attachments;
 pub mod conversation_flags;

@@ -101,6 +101,7 @@ const WIPE_TABLE_ORDER: &[&str] = &[
     "workspace_token_usage",
     "course_members",
     "external_auth_invites",
+    "chat_model_latency",
     "chat_models",
     // Its bindings, NRPS contexts and sync runs cascade from it; it has
     // to go before `users` because `created_by` does not cascade.
@@ -558,6 +559,7 @@ pub async fn run_seed(state: &AppState, admin_eppn: &str) -> Result<SeedReport, 
     // The rows carry a real model id so the on-read pricing join lands:
     // spend is never stored, it is tokens x the model's current rate.
     seed_alt_chat_model(state).await?;
+    seed_chat_model_latency(state).await?;
     let usage_rows = seed_usage_ledger(
         state,
         &[
@@ -1264,6 +1266,34 @@ async fn seed_alt_chat_model(state: &AppState) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Timing samples for the default chat model over the last week, so the
+/// teacher's model picker shows its speed in dev. Deterministic, roughly
+/// what Cerebras serves gpt-oss-120b at: a second or two to the first
+/// token, a couple of thousand tokens a second after it.
+async fn seed_chat_model_latency(state: &AppState) -> Result<(), AppError> {
+    let (model, provider) = USAGE_MODEL;
+    let ids = sqlx::query_scalar!(
+        r#"INSERT INTO chat_model_latency
+               (model, provider, recorded_at, ttft_ms, decode_ms, output_tokens, prompt_tokens)
+           SELECT $1, $2,
+                  now() - make_interval(hours => i * 4),
+                  600 + (i * 137) % 1400,
+                  300 + (i * 89) % 500,
+                  (300 + (i * 89) % 500) * (1800 + (i * 53) % 700) / 1000,
+                  4000 + (i * 311) % 6000
+           FROM generate_series(1, 40) AS i
+           RETURNING id"#,
+        model,
+        provider,
+    )
+    .fetch_all(&state.db)
+    .await?;
+    for id in ids {
+        track_composite(state, "chat_model_latency", &id.to_string()).await?;
+    }
+    Ok(())
+}
+
 /// Writes the student-chat ledger: one row per (student, course, day,
 /// model) over [`USAGE_WINDOW_DAYS`], weekdays only.
 ///
@@ -1826,6 +1856,13 @@ async fn wipe(state: &AppState) -> Result<WipeReport, AppError> {
             "usage_daily" => delete_by_uuid_pk(&state.db, "usage_daily", &pks).await?,
             "workspace_token_usage" => {
                 delete_by_uuid_pk(&state.db, "workspace_token_usage", &pks).await?
+            }
+            "chat_model_latency" => {
+                let ids: Vec<i64> = pks.iter().filter_map(|p| p.parse().ok()).collect();
+                sqlx::query!("DELETE FROM chat_model_latency WHERE id = ANY($1)", &ids)
+                    .execute(&state.db)
+                    .await?
+                    .rows_affected()
             }
             "chat_models" => delete_chat_models(&state.db, &pks).await?,
             "course_members" => delete_course_members(&state.db, &pks).await?,

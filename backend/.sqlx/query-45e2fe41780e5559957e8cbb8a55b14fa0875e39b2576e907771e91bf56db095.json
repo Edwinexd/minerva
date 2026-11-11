@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO chat_model_latency\n               (model, provider, recorded_at, ttft_ms, decode_ms, output_tokens, prompt_tokens)\n           SELECT $1, $2,\n                  now() - make_interval(hours => i * 4),\n                  600 + (i * 137) % 1400,\n                  300 + (i * 89) % 500,\n                  (300 + (i * 89) % 500) * (1800 + (i * 53) % 700) / 1000,\n                  4000 + (i * 311) % 6000\n           FROM generate_series(1, 40) AS i\n           RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "chat_model_latency",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "45e2fe41780e5559957e8cbb8a55b14fa0875e39b2576e907771e91bf56db095"
+}

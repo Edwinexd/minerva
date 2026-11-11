@@ -1,0 +1,57 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT model AS \"model!\",\n                  COUNT(*) AS \"samples!\",\n                  percentile_cont(0.5) WITHIN GROUP (ORDER BY ttft_ms::float8) AS ttft_p50_ms,\n                  percentile_cont(0.9) WITHIN GROUP (ORDER BY ttft_ms::float8) AS ttft_p90_ms,\n                  percentile_cont(0.5) WITHIN GROUP (\n                      ORDER BY output_tokens * 1000.0::float8 / decode_ms\n                  ) FILTER (WHERE decode_ms >= $2 AND output_tokens > 0)\n                      AS tokens_per_second_p50\n           FROM chat_model_latency\n           WHERE recorded_at > now() - make_interval(days => $1)\n           GROUP BY model",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "model!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "chat_model_latency",
+            "name": "model"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "samples!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "ttft_p50_ms",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "ttft_p90_ms",
+        "type_info": "Float8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "tokens_per_second_p50",
+        "type_info": "Float8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "7d2eca11346ebb8186aa6ef3725afe45263ed6fffede37d17b4f14bff63dacd2"
+}

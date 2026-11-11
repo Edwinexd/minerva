@@ -157,26 +157,44 @@ pub async fn reranker_models(
 
 /// Auth-gated catalog feed for the teacher chat-model dropdown. Returns
 /// `{ models: [{model, display_name, provider, input_usd_per_mtok,
-/// output_usd_per_mtok}] }` filtered to `enabled = true` rows. Prices
+/// output_usd_per_mtok, speed}] }` filtered to `enabled = true` rows. Prices
 /// are surfaced so the picker can show an estimated `$`/Mtok next to
 /// each option; `null` means unpriced (such a row can't be enabled, so
 /// in practice never appears here). Decimal downcasts to f64 only at
-/// this JSON boundary.
+/// this JSON boundary. `speed` is the model's measured time to first
+/// token and output rate over the last week of chat answers, `null`
+/// before it has served one.
 pub async fn chat_models(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, crate::error::AppError> {
     use rust_decimal::prelude::ToPrimitive;
     let rows = minerva_db::queries::chat_models::list_all(&state.db).await?;
+    let latency: std::collections::HashMap<String, _> =
+        minerva_db::queries::chat_model_latency::summaries(&state.db)
+            .await?
+            .into_iter()
+            .map(|s| (s.model.clone(), s))
+            .collect();
     let models: Vec<Value> = rows
         .into_iter()
         .filter(|r| r.enabled)
         .map(|r| {
+            let speed = latency.get(&r.model).map(|s| {
+                json!({
+                    "samples": s.samples,
+                    "ttft_p50_ms": s.ttft_p50_ms,
+                    "ttft_p90_ms": s.ttft_p90_ms,
+                    "tokens_per_second_p50": s.tokens_per_second_p50,
+                    "window_days": minerva_db::queries::chat_model_latency::SUMMARY_DAYS,
+                })
+            });
             json!({
                 "model": r.model,
                 "display_name": r.display_name,
                 "provider": r.provider,
                 "input_usd_per_mtok": r.input_usd_per_mtok.and_then(|v| v.to_f64()),
                 "output_usd_per_mtok": r.output_usd_per_mtok.and_then(|v| v.to_f64()),
+                "speed": speed,
             })
         })
         .collect();

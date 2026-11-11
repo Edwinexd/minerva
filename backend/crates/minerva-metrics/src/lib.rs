@@ -48,6 +48,12 @@ const SECONDS_BUCKETS: &[f64] = &[
     0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0,
 ];
 
+/// Histogram bucket bounds for rates (`*_per_second`), such as chat
+/// output tokens per second: local models write tens, Cerebras thousands.
+const PER_SECOND_BUCKETS: &[f64] = &[
+    5.0, 10.0, 20.0, 40.0, 60.0, 80.0, 100.0, 150.0, 200.0, 300.0, 500.0, 1000.0, 2000.0, 4000.0,
+];
+
 /// Install the global recorder + spawn the `/metrics` HTTP listener.
 ///
 /// `service` is attached as a `service="..."` global label to every
@@ -73,7 +79,12 @@ pub fn init(service: &'static str) {
         .add_global_label("service", service);
     let builder = match builder
         .set_buckets_for_metric(Matcher::Suffix("_seconds".to_string()), SECONDS_BUCKETS)
-    {
+        .and_then(|b| {
+            b.set_buckets_for_metric(
+                Matcher::Suffix("_per_second".to_string()),
+                PER_SECOND_BUCKETS,
+            )
+        }) {
         Ok(b) => b,
         Err(e) => {
             tracing::warn!("metrics: bucket config failed, exporter not started: {e}");

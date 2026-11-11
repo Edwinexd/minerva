@@ -1447,8 +1447,9 @@ async fn stream_one_chat_to_client(
     logprobs: bool,
     tx: &mpsc::Sender<Result<Event, AppError>>,
     full_text: &mut String,
-) -> Result<(i32, i32), String> {
+) -> Result<StreamedAnswer, String> {
     use crate::llm::{ChatDelta, ChatRequest};
+    use std::time::Instant;
 
     let (delta_tx, mut delta_rx) = mpsc::channel::<ChatDelta>(64);
     let req = ChatRequest {
@@ -1467,11 +1468,19 @@ async fn stream_one_chat_to_client(
     // channel), the forwarder relays each to the client. When the
     // provider finishes it drops `delta_tx`, closing the channel and
     // ending the forwarder.
+    let started = Instant::now();
+    let mut first_generated: Option<Instant> = None;
+    let mut first_text: Option<Instant> = None;
     let stream_fut = provider.stream(req, delta_tx);
     let forward = async {
         let mut client_connected = true;
         while let Some(delta) = delta_rx.recv().await {
+            let now = Instant::now();
+            first_generated.get_or_insert(now);
             if let Some(text) = delta.text {
+                if !text.is_empty() {
+                    first_text.get_or_insert(now);
+                }
                 full_text.push_str(&text);
                 if client_connected {
                     client_connected = tx
@@ -1487,7 +1496,55 @@ async fn stream_one_chat_to_client(
 
     let (stream_res, ()) = tokio::join!(stream_fut, forward);
     let usage = stream_res?;
-    Ok((usage.prompt_tokens as i32, usage.completion_tokens as i32))
+    let finished = Instant::now();
+    let latency = match (first_generated, first_text) {
+        (Some(generated), Some(text)) => Some(answer_latency(
+            &usage,
+            text - started,
+            finished - generated,
+            generated == text,
+        )),
+        _ => None,
+    };
+    Ok(StreamedAnswer {
+        prompt_tokens: usage.prompt_tokens as i32,
+        completion_tokens: usage.completion_tokens as i32,
+        latency,
+    })
+}
+
+struct StreamedAnswer {
+    prompt_tokens: i32,
+    completion_tokens: i32,
+    latency: Option<minerva_db::queries::chat_model_latency::Sample>,
+}
+
+/// Time to first visible token and the decode window of one streamed
+/// answer. Decode runs from the first generated token, so a model that
+/// streams its reasoning is measured over all of its output. One that
+/// hides it (OpenAI's reasoning models over chat completions) shows text
+/// only after the reasoning is done; its reported reasoning tokens are
+/// then left out of the count, or they would read as written in the
+/// text's window.
+fn answer_latency(
+    usage: &crate::llm::ChatUsage,
+    ttft: std::time::Duration,
+    decode: std::time::Duration,
+    reasoning_hidden: bool,
+) -> minerva_db::queries::chat_model_latency::Sample {
+    let clamp = |v: i64| v.clamp(0, i32::MAX as i64) as i32;
+    let ms = |d: std::time::Duration| d.as_millis().min(i32::MAX as u128) as i32;
+    let output = if reasoning_hidden {
+        usage.completion_tokens - usage.reasoning_tokens
+    } else {
+        usage.completion_tokens
+    };
+    minerva_db::queries::chat_model_latency::Sample {
+        ttft_ms: ms(ttft),
+        decode_ms: ms(decode),
+        output_tokens: clamp(output),
+        prompt_tokens: clamp(usage.prompt_tokens),
+    }
 }
 
 /// The turn's seed retrieval. A credit transfer workspace is answered
@@ -1665,8 +1722,8 @@ pub async fn stream_chat_to_client(
     )
     .await
     {
-        Ok((prompt, completion)) => {
-            usage.add_answer(model, provider.id(), prompt, completion);
+        Ok(answer) => {
+            record_answer(usage, model, provider.id(), answer);
             Ok(())
         }
         Err(primary_error) if full_text.is_empty() => {
@@ -1691,8 +1748,8 @@ pub async fn stream_chat_to_client(
                 )
                 .await
                 {
-                    Ok((prompt, completion)) => {
-                        usage.add_answer(&route.model, route.provider.id(), prompt, completion);
+                    Ok(answer) => {
+                        record_answer(usage, &route.model, route.provider.id(), answer);
                         return Ok(());
                     }
                     Err(error) if full_text.is_empty() => {
@@ -1704,6 +1761,23 @@ pub async fn stream_chat_to_client(
             Err(format!("all chat routes failed: {}", errors.join("; ")))
         }
         Err(error) => Err(error),
+    }
+}
+
+fn record_answer(
+    usage: &mut super::TurnUsage,
+    model: &str,
+    provider: &str,
+    answer: StreamedAnswer,
+) {
+    usage.add_answer(
+        model,
+        provider,
+        answer.prompt_tokens,
+        answer.completion_tokens,
+    );
+    if let Some(sample) = answer.latency {
+        usage.add_latency(model, provider, sample);
     }
 }
 
@@ -1741,6 +1815,28 @@ pub async fn record_turn_usage(ctx: &super::GenerationContext, usage: &super::Tu
             );
         }
         record_route_metrics(ctx, route, usage.research_phase_ran()).await;
+    }
+    record_latency(&ctx.db, usage.latency()).await;
+}
+
+/// Store each streamed answer's timing for the model picker and export it
+/// as histograms. Labels are provider and model, both bounded by the
+/// catalog.
+async fn record_latency(db: &sqlx::PgPool, latency: &[super::RouteLatency]) {
+    use minerva_db::queries::chat_model_latency::{self, MIN_DECODE_MS};
+    for entry in latency {
+        let s = &entry.sample;
+        metrics::histogram!("chat_ttft_seconds",
+            "provider" => entry.provider.clone(), "model" => entry.model.clone())
+        .record(s.ttft_ms as f64 / 1000.0);
+        if s.decode_ms >= MIN_DECODE_MS && s.output_tokens > 0 {
+            metrics::histogram!("chat_output_tokens_per_second",
+                "provider" => entry.provider.clone(), "model" => entry.model.clone())
+            .record(s.output_tokens as f64 * 1000.0 / s.decode_ms as f64);
+        }
+        if let Err(e) = chat_model_latency::insert(db, &entry.model, &entry.provider, s).await {
+            tracing::warn!(model = %entry.model, "chat_model_latency: insert failed: {e}");
+        }
     }
 }
 
@@ -2020,6 +2116,41 @@ pub async fn finalize(
 mod tests {
     use super::*;
     use minerva_core::rpc::{BenchmarkError, EmbedBenchmarkResult};
+
+    #[test]
+    fn answer_latency_counts_streamed_reasoning() {
+        let usage = crate::llm::ChatUsage {
+            prompt_tokens: 900,
+            completion_tokens: 600,
+            reasoning_tokens: 200,
+        };
+        let s = answer_latency(
+            &usage,
+            std::time::Duration::from_millis(1500),
+            std::time::Duration::from_millis(3000),
+            false,
+        );
+        assert_eq!(s.ttft_ms, 1500);
+        assert_eq!(s.decode_ms, 3000);
+        assert_eq!(s.output_tokens, 600);
+        assert_eq!(s.prompt_tokens, 900);
+    }
+
+    #[test]
+    fn answer_latency_drops_hidden_reasoning() {
+        let usage = crate::llm::ChatUsage {
+            prompt_tokens: 900,
+            completion_tokens: 600,
+            reasoning_tokens: 200,
+        };
+        let s = answer_latency(
+            &usage,
+            std::time::Duration::from_millis(8000),
+            std::time::Duration::from_millis(2000),
+            true,
+        );
+        assert_eq!(s.output_tokens, 400);
+    }
 
     struct FocusedIntentEmbedderClient;
 

@@ -254,12 +254,24 @@ export const adminChatModelsQuery = queryOptions({
 /// Public picker feed for the per-course teacher chat-model dropdown.
 /// Enabled models only; carries est. price so the picker can show
 /// `$`/Mtok alongside each option.
+/** Measured speed of a chat model over its recent answers. */
+export interface ChatModelSpeed {
+  samples: number
+  window_days: number
+  /** Request to first visible token (median, p90), reasoning included. */
+  ttft_p50_ms: number | null
+  ttft_p90_ms: number | null
+  /** Median output tokens per second; null when no answer was long enough to time. */
+  tokens_per_second_p50: number | null
+}
+
 export interface PublicChatModel {
   model: string
   display_name: string
   provider: string
   input_usd_per_mtok: number | null
   output_usd_per_mtok: number | null
+  speed?: ChatModelSpeed | null
 }
 
 export const chatModelsQuery = queryOptions({

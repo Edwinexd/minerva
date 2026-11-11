@@ -38,6 +38,15 @@ pub struct TurnUsage {
     /// Set on the tool-use path so the message row persists the research
     /// split (even a zero one) instead of NULL.
     research_phase: bool,
+    /// Timing of each streamed answer call, by the route that served it.
+    latency: Vec<RouteLatency>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RouteLatency {
+    pub model: String,
+    pub provider: String,
+    pub sample: minerva_db::queries::chat_model_latency::Sample,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,6 +106,24 @@ impl TurnUsage {
         route.completion_tokens += completion as i64;
         route.research_prompt_tokens += prompt as i64;
         route.research_completion_tokens += completion as i64;
+    }
+
+    /// Timing of a streamed answer call, recorded with the turn's usage.
+    pub fn add_latency(
+        &mut self,
+        model: &str,
+        provider: &str,
+        sample: minerva_db::queries::chat_model_latency::Sample,
+    ) {
+        self.latency.push(RouteLatency {
+            model: model.to_string(),
+            provider: provider.to_string(),
+            sample,
+        });
+    }
+
+    pub fn latency(&self) -> &[RouteLatency] {
+        &self.latency
     }
 
     pub fn routes(&self) -> &[RouteUsage] {

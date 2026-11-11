@@ -7,7 +7,7 @@ import {
   rerankerModelsQuery,
   courseKgTokenUsageQuery,
 } from "@/lib/queries"
-import { chatModelDisplayName } from "@/lib/chat-models"
+import { chatModelDisplayName, formatRate, formatSeconds } from "@/lib/chat-models"
 import { formatUsd } from "@/lib/currency"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -333,7 +333,7 @@ function KgTokenUsageCard({ courseId }: { courseId: string }) {
 
 function CourseConfigForm({ course }: { course: Course }) {
   const queryClient = useQueryClient()
-  const { t } = useTranslation("teacher")
+  const { t, i18n } = useTranslation("teacher")
   const { t: tCommon } = useTranslation("common")
   const { data: chatModelsData } = useQuery(chatModelsQuery)
   // Backend filters this list to admin-enabled catalog rows. If an
@@ -569,16 +569,33 @@ function CourseConfigForm({ course }: { course: Course }) {
                       },
                       ...(chatModelsData?.models ?? []),
                     ]
-                ).map((m) => (
-                  <SelectItem key={m.model} value={m.model}>
-                    {chatModelDisplayName(m)}
-                    {m.provider ? ` (${m.provider})` : ""}
-                    {m.input_usd_per_mtok !== null &&
-                    m.output_usd_per_mtok !== null
-                      ? ` - ${formatUsd(m.input_usd_per_mtok)} / ${formatUsd(m.output_usd_per_mtok)} per Mtok`
-                      : ""}
-                  </SelectItem>
-                ))}
+                ).map((m) => {
+                  const speed = m.speed
+                  const ttft = speed?.ttft_p50_ms ?? null
+                  const tps = speed?.tokens_per_second_p50 ?? null
+                  return (
+                    <SelectItem key={m.model} value={m.model}>
+                      {chatModelDisplayName(m)}
+                      {m.provider ? ` (${m.provider})` : ""}
+                      {m.input_usd_per_mtok !== null &&
+                      m.output_usd_per_mtok !== null
+                        ? ` - ${formatUsd(m.input_usd_per_mtok)} / ${formatUsd(m.output_usd_per_mtok)} per Mtok`
+                        : ""}
+                      {ttft !== null
+                        ? ` - ${
+                            tps !== null
+                              ? t("config.modelSpeedShort", {
+                                  ttft: formatSeconds(ttft, i18n.language),
+                                  tps: formatRate(tps, i18n.language),
+                                })
+                              : t("config.modelSpeedShortNoRate", {
+                                  ttft: formatSeconds(ttft, i18n.language),
+                                })
+                          }`
+                        : ""}
+                    </SelectItem>
+                  )
+                })}
               </SelectContent>
             </Select>
           </div>

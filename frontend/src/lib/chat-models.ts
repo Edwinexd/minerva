@@ -16,3 +16,16 @@ export function chatModelDisplayName(m: {
 }): string {
   return CHAT_MODEL_DISPLAY[m.model]?.name ?? m.display_name
 }
+
+/** Milliseconds as seconds with one decimal, e.g. `0.8`. */
+export function formatSeconds(ms: number, locale?: string): string {
+  return (ms / 1000).toLocaleString(locale, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  })
+}
+
+/** A token rate rounded to a whole number, e.g. `1,200`. */
+export function formatRate(perSecond: number, locale?: string): string {
+  return Math.round(perSecond).toLocaleString(locale)
+}

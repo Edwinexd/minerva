@@ -52,6 +52,8 @@
     "temperatureLabel": "Temperatur: {{value}}",
     "modelLabel": "Modell",
     "modelPlaceholder": "Välj en modell",
+    "modelSpeedShort": "TTFT {{ttft}} s, {{tps}} token/s",
+    "modelSpeedShortNoRate": "TTFT {{ttft}} s",
     "strategyLabel": "Genereringsstrategi",
     "strategySimple": "Simple (hämta först, generera sedan)",
     "strategyFlare": "FLARE (aktiv hämtning per mening)",

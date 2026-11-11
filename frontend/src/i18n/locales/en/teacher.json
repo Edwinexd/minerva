@@ -52,6 +52,8 @@
     "temperatureLabel": "Temperature: {{value}}",
     "modelLabel": "Model",
     "modelPlaceholder": "Select a model",
+    "modelSpeedShort": "TTFT {{ttft}} s, {{tps}} tok/s",
+    "modelSpeedShortNoRate": "TTFT {{ttft}} s",
     "strategyLabel": "Generation Strategy",
     "strategySimple": "Simple (retrieve first, then generate)",
     "strategyFlare": "FLARE (sentence-level active retrieval)",

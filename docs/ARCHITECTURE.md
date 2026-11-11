@@ -90,6 +90,16 @@ tokens x the model's current rate. A re-price therefore moves enforcement and
 every dashboard at once without rewriting history, and a model that has left the
 catalog prices at 0 rather than dropping its rows out of the sum.
 
+Each streamed chat answer also leaves a timing sample in `chat_model_latency`,
+under the model and provider that served it: time from the request to the first
+visible token, and output tokens over the window from the first generated token
+(streamed reasoning included) to the end of the stream. The teacher's model
+picker shows each model's last-week medians from it, and the same values are
+exported as `chat_ttft_seconds` and `chat_output_tokens_per_second`. The
+scheduler's `chat_model_latency` sweep drops samples after 30 days. Credit
+transfer replies are one schema-bound call, not a stream, and FLARE restarts its
+stream mid-answer, so neither is sampled.
+
 ## Service topology
 
 The backend is six Rust binaries built from one Cargo workspace, split by

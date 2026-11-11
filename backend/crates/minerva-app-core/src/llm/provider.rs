@@ -136,6 +136,23 @@ pub fn apply_model_variant(body: &mut Value, provider_id: &str) {
     );
 }
 
+/// OpenAI's reasoning models (the o-series, `gpt-5` and later, but not their
+/// `-chat` variants) reject any `temperature` but the default with a 400, so
+/// it is left out for them rather than sent and refused.
+pub fn is_openai_reasoning_model(model: &str) -> bool {
+    let id = api_model_id(model);
+    if id.contains("-chat") {
+        return false;
+    }
+    if let Some(rest) = id.strip_prefix('o') {
+        return rest.starts_with(|c: char| c.is_ascii_digit());
+    }
+    id.strip_prefix("gpt-")
+        .and_then(|rest| rest.split(['.', '-']).next())
+        .and_then(|major| major.parse::<u32>().ok())
+        .is_some_and(|major| major >= 5)
+}
+
 /// Rewrite an OpenAI-shaped chat-completions body into what `provider_id`
 /// accepts. Every OpenAI-compatible request passes through here (in
 /// `openai_chat_request`), so call sites build one body shape for all
@@ -147,6 +164,14 @@ pub fn apply_model_variant(body: &mut Value, provider_id: &str) {
 /// caps output with `max_tokens` only.
 pub fn adapt_body(body: &mut Value, provider_id: &str) {
     apply_model_variant(body, provider_id);
+    if provider_id == PROVIDER_OPENAI {
+        let model = body["model"].as_str().unwrap_or_default().to_string();
+        if is_openai_reasoning_model(&model) {
+            if let Some(obj) = body.as_object_mut() {
+                obj.remove("temperature");
+            }
+        }
+    }
     if provider_id != PROVIDER_MISTRAL {
         return;
     }
@@ -1304,6 +1329,36 @@ mod tests {
         assert!(!p.supports_logprobs());
         assert!(p.openai_endpoint().is_none());
         assert_eq!(p.messages_url, "https://api.anthropic.com/v1/messages");
+    }
+
+    #[test]
+    fn openai_reasoning_models_get_no_temperature() {
+        for model in [
+            "gpt-6-luna@flex",
+            "gpt-5.4-mini",
+            "o3",
+            "o4-mini",
+            "gpt-6.1-sol",
+        ] {
+            assert!(is_openai_reasoning_model(model), "{model}");
+            let mut body = serde_json::json!({"model": model, "temperature": 0.2});
+            adapt_body(&mut body, PROVIDER_OPENAI);
+            assert!(body.get("temperature").is_none(), "{model}");
+        }
+        for model in [
+            "gpt-4.1",
+            "gpt-4o-mini@flex",
+            "gpt-5-chat-latest",
+            "chat-latest",
+        ] {
+            assert!(!is_openai_reasoning_model(model), "{model}");
+        }
+        let mut body = serde_json::json!({"model": "gpt-4.1", "temperature": 0.2});
+        adapt_body(&mut body, PROVIDER_OPENAI);
+        assert_eq!(body["temperature"], 0.2);
+        let mut body = serde_json::json!({"model": "gpt-oss-120b", "temperature": 0.2});
+        adapt_body(&mut body, PROVIDER_CEREBRAS);
+        assert_eq!(body["temperature"], 0.2);
     }
 
     #[test]

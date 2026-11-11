@@ -57,7 +57,25 @@ Call sites build one OpenAI-shaped body. `openai_chat_request` passes it
 through `provider::adapt_body` for the provider it targets, which is where
 dialect differences live: OpenAI's Flex variant becomes `service_tier`, and
 Mistral, which rejects any field outside its schema, loses `stream_options`
-and gets `max_tokens` in place of `max_completion_tokens`.
+and gets `max_tokens` in place of `max_completion_tokens`. OpenAI's reasoning
+models (the o-series, `gpt-5` and later, not their `-chat` variants) accept
+only the default `temperature`, so it is left out for them.
+
+One call shape does not fit every provider. Those reasoning models refuse
+function tools on chat completions unless reasoning is off, so a research
+round served by OpenAI goes to the Responses API instead
+(`strategy::responses`): the loop keeps its history in chat-completions
+shape, converts it per round, and replays each round's encrypted reasoning
+(`store: false`) so the model keeps its chain of thought across tool calls.
+Every other provider keeps chat completions, and each fallback route builds
+its own request.
+
+A call falls back through the enabled routes when one fails: a refused
+request, a stream that fails before showing anything (flex capacity), or,
+for the credit transfer reply, no answer within 180s or an empty one. Each
+fallback is logged with the error that caused it; a silent fallback is
+indistinguishable from the model being used, which is how luna's research
+and replies once ran on gpt-oss unnoticed.
 
 Which provider a call reaches is a property of the *model*, not of the call
 site. The admin-managed `chat_models` catalog maps every model id to its
@@ -434,6 +452,15 @@ every request. Chats are private to their author (no teacher review).
 `case_retention_days` (default 90), since external syllabuses often carry
 an applicant's personal data. The same plans are exposed read-only over
 MCP (`get_plan`).
+
+**Measuring it.** `scripts/eval_credit_transfer.py` scores the comparison
+against cases with a known answer: real DSV plans, stripped of their codes,
+name and department, sent as the external syllabus whole, with outcomes
+removed, or with an unrelated plan's outcomes added. It drives the real HTTP
+API and reads back the stored comparison and tool events, so it measures
+retrieval (opening search versus the plans after research), selection,
+verdict, coverage labels and page citations. The Nov 2026 baseline and the
+known model errors are in `AGENTS.md`.
 
 ## Chat / RAG pipeline
 

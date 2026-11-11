@@ -1524,6 +1524,12 @@ pub async fn seed_chunks(
 
 /// Generate the turn's reply into `full_text`.
 ///
+/// How long one route may take to write a credit transfer reply, retries
+/// included, before the next route is tried. The slowest whole turn in the
+/// Nov 2026 eval (research included) took 88s; a route that hung went 15
+/// minutes and came back empty.
+const REPLY_ROUTE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
+
 /// A course streams its answer while the model writes it. A credit
 /// transfer workspace asks for the reply envelope in one call instead: a
 /// strict schema decision cannot be taken from a half-streamed answer, and
@@ -1585,7 +1591,26 @@ pub async fn complete_reply(
             provider: Some(route_provider.clone()),
             model: route_model.clone(),
         };
-        match crate::llm::util_request(&http, &route, &body).await {
+        let attempt = tokio::time::timeout(
+            REPLY_ROUTE_TIMEOUT,
+            crate::llm::util_request(&http, &route, &body),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            Some(Err(format!(
+                "no reply within {}s",
+                REPLY_ROUTE_TIMEOUT.as_secs()
+            )))
+        });
+        // An empty reply cannot be read as the envelope; the next route
+        // answers instead of the turn storing nothing.
+        let attempt = match attempt {
+            Some(Ok((content, _))) if content.trim().is_empty() => {
+                Some(Err("the model returned an empty reply".to_string()))
+            }
+            other => other,
+        };
+        match attempt {
             Some(Ok((content, served))) => {
                 usage.add_answer(
                     &route_model,
@@ -1596,7 +1621,15 @@ pub async fn complete_reply(
                 *full_text = content;
                 return Ok(());
             }
-            Some(Err(e)) => errors.push(format!("{}/{}: {e}", route_provider.id(), route_model)),
+            Some(Err(e)) => {
+                tracing::warn!(
+                    provider = route_provider.id(),
+                    model = %route_model,
+                    error = %e,
+                    "reply request failed; trying the next route"
+                );
+                errors.push(format!("{}/{}: {e}", route_provider.id(), route_model))
+            }
             None => errors.push(format!("{route_model}: provider not configured")),
         }
     }

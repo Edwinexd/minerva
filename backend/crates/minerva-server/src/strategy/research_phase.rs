@@ -43,6 +43,7 @@ use tokio::sync::mpsc;
 
 use super::common;
 use super::common::{chunk_identity_hash, RagChunk};
+use super::responses;
 use super::tools::{self, ToolCatalogFlags, ToolDispatchCtx};
 use super::{GenerationContext, ThinkingDisclosure};
 use crate::error::AppError;
@@ -86,6 +87,13 @@ pub struct ResearchConfig {
     /// during one research turn. Same role as
     /// `flare::STREAM_IDLE_TIMEOUT`.
     pub stream_idle_timeout: Duration,
+    /// Output cap of a Responses round (`responses`). Reasoning counts
+    /// against it, so it is far above `max_tokens_per_turn`, which sizes
+    /// visible text.
+    pub reasoning_max_output_tokens: i32,
+    /// Idle timeout of a Responses round. A reasoning model streams
+    /// nothing while it thinks, and a flex request may queue first.
+    pub reasoning_idle_timeout: Duration,
 }
 
 impl ResearchConfig {
@@ -104,6 +112,8 @@ impl ResearchConfig {
             wall_clock_budget: Duration::from_secs(45),
             max_tokens_per_turn: 1536,
             stream_idle_timeout: Duration::from_secs(60),
+            reasoning_max_output_tokens: 16_384,
+            reasoning_idle_timeout: Duration::from_secs(300),
         }
     }
 }
@@ -401,13 +411,13 @@ pub async fn run(
         turns += 1;
 
         let system = build_research_system_prompt(ctx, &chunks, corpus.as_ref());
-        let messages = compose_messages(&system, &history_messages);
 
         let outcome = match stream_research_turn(
             &http_client,
             ctx,
             &config,
-            &messages,
+            &system,
+            &history_messages,
             &catalog,
             tx,
             &mut transcript,
@@ -454,6 +464,11 @@ pub async fn run(
                 })
                 .collect();
             assistant_msg["tool_calls"] = serde_json::Value::Array(calls);
+        }
+        // A Responses round's own items (its encrypted reasoning among
+        // them) ride along so the next round replays them verbatim.
+        if let Some(items) = &outcome.output_items {
+            assistant_msg[responses::OUTPUT_ITEMS_KEY] = serde_json::Value::Array(items.clone());
         }
         history_messages.push(assistant_msg);
 
@@ -727,6 +742,9 @@ struct TurnOutcome {
     /// or a fallback route when the primary request failed.
     model: String,
     provider: String,
+    /// The round's Responses output items (encrypted reasoning, calls,
+    /// text) to replay next round; `None` for a chat-completions round.
+    output_items: Option<Vec<serde_json::Value>>,
 }
 
 #[derive(Debug, Clone)]
@@ -798,10 +816,12 @@ fn build_research_system_prompt(
     )
 }
 
+/// A chat-completions round's messages. Responses output items are
+/// dropped: a chat-completions provider rejects unknown fields.
 fn compose_messages(system_prompt: &str, history: &[serde_json::Value]) -> Vec<serde_json::Value> {
     let mut out = Vec::with_capacity(history.len() + 1);
     out.push(serde_json::json!({"role": "system", "content": system_prompt}));
-    out.extend_from_slice(history);
+    out.extend(responses::strip_output_items(history));
     out
 }
 
@@ -866,83 +886,217 @@ fn render_summary(tool_log: &[ToolLogEntry], flare_injections: usize) -> String 
     }
 }
 
+/// One research round. Tries the workspace's model, then each fallback
+/// route, building each route's own request: OpenAI's Responses API for
+/// OpenAI (tools with reasoning, see `responses`), chat completions for
+/// every other provider.
 #[allow(clippy::too_many_arguments)]
 async fn stream_research_turn(
     http_client: &reqwest::Client,
     ctx: &GenerationContext,
     config: &ResearchConfig,
-    messages: &[serde_json::Value],
+    system: &str,
+    history: &[serde_json::Value],
     catalog: &[serde_json::Value],
     tx: &mpsc::Sender<Result<Event, AppError>>,
     transcript: &mut String,
     disclosure: ThinkingDisclosure,
 ) -> Result<TurnOutcome, String> {
-    let mut body = serde_json::json!({
-        "model": ctx.model,
-        "messages": messages,
-        "temperature": ctx.temperature,
-        "stream": true,
-        "max_completion_tokens": config.max_tokens_per_turn,
-        "tools": catalog,
-        "tool_choice": "auto",
-        "stream_options": { "include_usage": true },
-    });
-    if config.use_logprobs {
-        body["logprobs"] = serde_json::Value::Bool(true);
-        body["top_logprobs"] = serde_json::Value::Number(1.into());
+    let mut routes: Vec<(&str, &str, &str, &str)> = vec![(
+        ctx.provider.id(),
+        ctx.chat_base_url.as_str(),
+        ctx.chat_api_key.as_str(),
+        ctx.model.as_str(),
+    )];
+    for route in &ctx.fallback_routes {
+        if let Some((url, key)) = route.provider.openai_endpoint() {
+            routes.push((route.provider.id(), url, key, route.model.as_str()));
+        }
     }
 
-    let mut served_by = (ctx.model.clone(), ctx.provider.id().to_string());
-    let response = match common::openai_chat_request(
-        http_client,
-        ctx.provider.id(),
-        &ctx.chat_base_url,
-        &ctx.chat_api_key,
-        &body,
-    )
-    .await
-    {
-        Ok(response) => response,
-        Err(primary_error) => {
-            let mut errors = vec![format!(
-                "{}/{}: {primary_error}",
-                ctx.provider.id(),
-                ctx.model
-            )];
-            let mut selected = None;
-            for route in &ctx.fallback_routes {
-                let Some((url, key)) = route.provider.openai_endpoint() else {
-                    continue;
-                };
-                body["model"] = serde_json::Value::String(route.model.clone());
-                tracing::warn!(
-                    primary_provider = ctx.provider.id(),
-                    primary_model = %ctx.model,
-                    fallback_provider = route.provider.id(),
-                    fallback_model = %route.model,
-                    error = %primary_error,
-                    "research request failed; trying fallback route"
-                );
-                match common::openai_chat_request(http_client, route.provider.id(), url, key, &body)
-                    .await
-                {
-                    Ok(response) => {
-                        selected = Some(response);
-                        served_by = (route.model.clone(), route.provider.id().to_string());
-                        break;
-                    }
-                    Err(error) => {
-                        errors.push(format!("{}/{}: {error}", route.provider.id(), route.model))
+    let mut errors: Vec<String> = Vec::new();
+    for (provider_id, url, key, model) in routes {
+        if let Some(previous) = errors.last() {
+            tracing::warn!(
+                primary_provider = ctx.provider.id(),
+                primary_model = %ctx.model,
+                fallback_provider = provider_id,
+                fallback_model = %model,
+                error = %previous,
+                "research request failed; trying fallback route"
+            );
+        }
+        let served_by = (model.to_string(), provider_id.to_string());
+        let streamed = transcript.len();
+        let round = if responses::uses_responses_api(provider_id) {
+            let body = responses::build_body(
+                model,
+                system,
+                history,
+                catalog,
+                config.reasoning_max_output_tokens,
+            );
+            match common::openai_chat_request(
+                http_client,
+                provider_id,
+                &responses::responses_url(url),
+                key,
+                &body,
+            )
+            .await
+            {
+                Ok(response) => {
+                    read_responses_round(response, config, tx, transcript, disclosure, served_by)
+                        .await
+                }
+                Err(e) => Err(e),
+            }
+        } else {
+            let mut body = serde_json::json!({
+                "model": model,
+                "messages": compose_messages(system, history),
+                "temperature": ctx.temperature,
+                "stream": true,
+                "max_completion_tokens": config.max_tokens_per_turn,
+                "tools": catalog,
+                "tool_choice": "auto",
+                "stream_options": { "include_usage": true },
+            });
+            if config.use_logprobs {
+                body["logprobs"] = serde_json::Value::Bool(true);
+                body["top_logprobs"] = serde_json::Value::Number(1.into());
+            }
+            match common::openai_chat_request(http_client, provider_id, url, key, &body).await {
+                Ok(response) => {
+                    read_chat_round(response, config, tx, transcript, disclosure, served_by).await
+                }
+                Err(e) => Err(e),
+            }
+        };
+        match round {
+            // A refused request, or a round that failed before showing
+            // anything (flex capacity, an upstream error event), is a
+            // failed route; a round that failed mid-answer ends research.
+            Err(e) if transcript.len() == streamed => {
+                errors.push(format!("{provider_id}/{model}: {e}"))
+            }
+            result => return result,
+        }
+    }
+    Err(format!("all research routes failed: {}", errors.join("; ")))
+}
+
+/// Server-sent events as lines, across chunk and UTF-8 boundaries.
+#[derive(Default)]
+struct SseLines {
+    carry: Vec<u8>,
+    buffer: String,
+}
+
+impl SseLines {
+    fn push(&mut self, chunk: &[u8]) {
+        self.carry.extend_from_slice(chunk);
+        let valid = match std::str::from_utf8(&self.carry) {
+            Ok(_) => self.carry.len(),
+            Err(e) => e.valid_up_to(),
+        };
+        if valid > 0 {
+            self.buffer.push_str(
+                std::str::from_utf8(&self.carry[..valid]).expect("prefix was UTF-8 validated"),
+            );
+            self.carry.drain(..valid);
+        }
+    }
+
+    fn next_line(&mut self) -> Option<String> {
+        let end = self.buffer.find('\n')?;
+        let line = self.buffer[..end].trim().to_string();
+        self.buffer.drain(..=end);
+        Some(line)
+    }
+}
+
+/// Read a Responses round: visible text streams as the thinking trace,
+/// the calls, the items to replay and the usage arrive with the final event.
+async fn read_responses_round(
+    response: reqwest::Response,
+    config: &ResearchConfig,
+    tx: &mpsc::Sender<Result<Event, AppError>>,
+    transcript: &mut String,
+    disclosure: ThinkingDisclosure,
+    served_by: (String, String),
+) -> Result<TurnOutcome, String> {
+    let mut stream = response.bytes_stream();
+    let mut lines = SseLines::default();
+    let mut content = String::new();
+    loop {
+        let next = tokio::time::timeout(config.reasoning_idle_timeout, stream.next())
+            .await
+            .map_err(|_| {
+                format!(
+                    "Responses stream idle timeout ({}s)",
+                    config.reasoning_idle_timeout.as_secs()
+                )
+            })?;
+        match next {
+            Some(Ok(chunk)) => lines.push(&chunk),
+            Some(Err(e)) => return Err(format!("Stream error: {e}")),
+            None => return Err("Responses stream ended before the round completed".into()),
+        }
+        while let Some(line) = lines.next_line() {
+            let Some(data) = line.strip_prefix("data:") else {
+                continue;
+            };
+            let Ok(event) = serde_json::from_str::<serde_json::Value>(data.trim()) else {
+                continue;
+            };
+            match responses::parse_event(&event) {
+                responses::StreamEvent::Text(delta) => {
+                    content.push_str(&delta);
+                    transcript.push_str(&delta);
+                    if !disclosure.withheld() {
+                        emit_thinking_token(tx, &delta).await;
                     }
                 }
+                responses::StreamEvent::Done(round) => {
+                    return Ok(TurnOutcome {
+                        content,
+                        tool_calls: round
+                            .calls
+                            .into_iter()
+                            .map(|c| PendingToolCall {
+                                id: c.call_id,
+                                name: c.name,
+                                arguments: c.arguments,
+                            })
+                            .collect(),
+                        low_confidence_sentence: None,
+                        prompt_tokens: round.input_tokens,
+                        completion_tokens: round.output_tokens,
+                        model: served_by.0,
+                        provider: served_by.1,
+                        output_items: Some(round.items),
+                    });
+                }
+                responses::StreamEvent::Failed(message) => return Err(message),
+                responses::StreamEvent::Other => {}
             }
-            selected.ok_or_else(|| format!("all research routes failed: {}", errors.join("; ")))?
         }
-    };
+    }
+}
 
+/// Read a chat-completions round: content and tool-call deltas, the FLARE
+/// logprob signal, and the usage in the final chunk.
+async fn read_chat_round(
+    response: reqwest::Response,
+    config: &ResearchConfig,
+    tx: &mpsc::Sender<Result<Event, AppError>>,
+    transcript: &mut String,
+    disclosure: ThinkingDisclosure,
+    served_by: (String, String),
+) -> Result<TurnOutcome, String> {
     let mut stream = response.bytes_stream();
-    let mut byte_carry: Vec<u8> = Vec::new();
-    let mut sse_buffer = String::new();
+    let mut lines = SseLines::default();
 
     let mut content = String::new();
     let mut sentence_buffer = String::new();
@@ -961,7 +1115,7 @@ async fn stream_research_turn(
             Ok(n) => n,
             Err(_) => {
                 return Err(format!(
-                    "Cerebras stream idle timeout ({}s)",
+                    "Chat stream idle timeout ({}s)",
                     config.stream_idle_timeout.as_secs()
                 ));
             }
@@ -971,22 +1125,9 @@ async fn stream_research_turn(
             Some(Err(e)) => return Err(format!("Stream error: {}", e)),
             None => break,
         };
-        byte_carry.extend_from_slice(&chunk);
-        let valid_up_to = match std::str::from_utf8(&byte_carry) {
-            Ok(_) => byte_carry.len(),
-            Err(e) => e.valid_up_to(),
-        };
-        if valid_up_to > 0 {
-            let valid_str = std::str::from_utf8(&byte_carry[..valid_up_to])
-                .expect("prefix was UTF-8 validated");
-            sse_buffer.push_str(valid_str);
-            byte_carry.drain(..valid_up_to);
-        }
+        lines.push(&chunk);
 
-        while let Some(line_end) = sse_buffer.find('\n') {
-            let line = sse_buffer[..line_end].trim().to_string();
-            sse_buffer.drain(..=line_end);
-
+        while let Some(line) = lines.next_line() {
             if line == "data: [DONE]" {
                 let tool_calls: Vec<PendingToolCall> = tool_call_acc
                     .into_iter()
@@ -1000,6 +1141,7 @@ async fn stream_research_turn(
                     completion_tokens,
                     model: served_by.0,
                     provider: served_by.1,
+                    output_items: None,
                 });
             }
             let Some(data) = line.strip_prefix("data: ") else {
@@ -1100,6 +1242,7 @@ async fn stream_research_turn(
         completion_tokens,
         model: served_by.0,
         provider: served_by.1,
+        output_items: None,
     })
 }
 
@@ -1422,6 +1565,7 @@ mod stream_integration_tests {
             &http,
             &ctx,
             &config,
+            "",
             &messages,
             &catalog,
             &tx,
@@ -1482,6 +1626,7 @@ mod stream_integration_tests {
             &reqwest::Client::new(),
             &ctx,
             &ResearchConfig::defaults(false),
+            "",
             &[serde_json::json!({"role": "user", "content": "?"})],
             &[],
             &tx,
@@ -1558,7 +1703,7 @@ mod stream_integration_tests {
         ctx.fallback_routes.push(crate::strategy::ChatRoute {
             model: "fallback-model".to_string(),
             provider: std::sync::Arc::new(crate::llm::OpenAiCompatibleProvider::new(
-                "openai",
+                "groq",
                 &fallback.uri(),
                 "fallback-key",
                 reqwest::Client::new(),
@@ -1569,6 +1714,7 @@ mod stream_integration_tests {
             &reqwest::Client::new(),
             &ctx,
             &ResearchConfig::defaults(false),
+            "",
             &[serde_json::json!({"role": "user", "content": "?"})],
             &[],
             &tx,
@@ -1583,14 +1729,240 @@ mod stream_integration_tests {
         assert_eq!(outcome.completion_tokens, 2);
         // Billed to the route that served the round, not the course model.
         assert_eq!(outcome.model, "fallback-model");
-        assert_eq!(outcome.provider, "openai");
+        assert_eq!(outcome.provider, "groq");
 
-        // OpenAI's newer models 400 on the legacy `max_tokens`.
+        // The chat body caps with `max_completion_tokens`: OpenAI's newer
+        // models 400 on the legacy `max_tokens`.
         let requests = fallback.received_requests().await.unwrap();
         let sent: serde_json::Value = requests[0].body_json().unwrap();
         assert_eq!(sent["model"], "fallback-model");
         assert!(sent.get("max_tokens").is_none());
         assert!(sent["max_completion_tokens"].is_number());
+    }
+
+    fn openai_ctx(server: &MockServer) -> GenerationContext {
+        let mut ctx = fake_ctx_with_url(format!("{}/v1/chat/completions", server.uri()));
+        ctx.model = "gpt-6-luna@flex".to_string();
+        ctx.provider = std::sync::Arc::new(crate::llm::OpenAiCompatibleProvider::new(
+            "openai",
+            &format!("{}/v1", server.uri()),
+            "test-key",
+            reqwest::Client::new(),
+        ));
+        ctx
+    }
+
+    #[tokio::test]
+    async fn an_openai_round_reasons_with_tools_on_the_responses_api() {
+        let server = MockServer::start().await;
+        let completed = serde_json::json!({
+            "type": "response.completed",
+            "response": {
+                "output": [
+                    {"type": "reasoning", "id": "rs_1", "encrypted_content": "enc", "summary": []},
+                    {"type": "function_call", "id": "fc_1", "call_id": "call_1",
+                     "name": "search_plans", "arguments": "{\"query\":\"Java\"}"}
+                ],
+                "usage": {"input_tokens": 900, "output_tokens": 410}
+            }
+        });
+        let body = format!(
+            "event: response.output_text.delta\ndata: {}\n\nevent: response.completed\ndata: {}\n\n",
+            serde_json::json!({"type": "response.output_text.delta", "delta": "Söker planer"}),
+            completed
+        );
+        Mock::given(method("POST"))
+            .and(path("/v1/responses"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(body),
+            )
+            .mount(&server)
+            .await;
+
+        let ctx = openai_ctx(&server);
+        let catalog = vec![serde_json::json!({
+            "type": "function",
+            "function": {"name": "search_plans", "description": "d",
+                         "parameters": {"type": "object", "properties": {}}}
+        })];
+        let history = vec![serde_json::json!({"role": "user", "content": "Jämför"})];
+        let (tx, mut rx) = mpsc::channel::<Result<Event, AppError>>(16);
+        let mut transcript = String::new();
+        let outcome = stream_research_turn(
+            &reqwest::Client::new(),
+            &ctx,
+            &ResearchConfig::defaults(false),
+            "system prompt",
+            &history,
+            &catalog,
+            &tx,
+            &mut transcript,
+            ThinkingDisclosure::Open,
+        )
+        .await
+        .expect("a Responses round should succeed");
+        drop(tx);
+        let mut emitted = 0;
+        while rx.recv().await.is_some() {
+            emitted += 1;
+        }
+
+        assert_eq!(outcome.content, "Söker planer");
+        assert_eq!(transcript, "Söker planer");
+        assert_eq!(emitted, 1);
+        assert_eq!(outcome.tool_calls.len(), 1);
+        assert_eq!(outcome.tool_calls[0].id, "call_1");
+        assert_eq!(outcome.tool_calls[0].name, "search_plans");
+        assert_eq!(outcome.tool_calls[0].arguments, "{\"query\":\"Java\"}");
+        assert_eq!(
+            (outcome.prompt_tokens, outcome.completion_tokens),
+            (900, 410)
+        );
+        assert_eq!(outcome.model, "gpt-6-luna@flex");
+        assert_eq!(outcome.provider, "openai");
+        assert_eq!(outcome.output_items.as_ref().map(Vec::len), Some(2));
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        let sent: serde_json::Value = requests[0].body_json().unwrap();
+        assert_eq!(sent["model"], "gpt-6-luna");
+        assert_eq!(sent["service_tier"], "flex");
+        assert_eq!(sent["instructions"], "system prompt");
+        assert_eq!(sent["reasoning"]["effort"], responses::REASONING_EFFORT);
+        assert_eq!(sent["store"], false);
+        assert_eq!(sent["input"][0]["content"], "Jämför");
+        assert_eq!(sent["tools"][0]["name"], "search_plans");
+        assert!(sent.get("temperature").is_none());
+        assert!(sent.get("messages").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_failed_openai_round_falls_back_to_chat_without_its_reasoning() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/responses"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("bad request"))
+            .mount(&server)
+            .await;
+        let fallback = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(concat!(
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n",
+                        "data: [DONE]\n\n"
+                    )),
+            )
+            .mount(&fallback)
+            .await;
+
+        let mut ctx = openai_ctx(&server);
+        ctx.fallback_routes.push(crate::strategy::ChatRoute {
+            model: "gpt-oss-120b".to_string(),
+            provider: std::sync::Arc::new(crate::llm::OpenAiCompatibleProvider::new(
+                "cerebras",
+                &fallback.uri(),
+                "fallback-key",
+                reqwest::Client::new(),
+            )),
+        });
+        let history = vec![
+            serde_json::json!({"role": "user", "content": "Jämför"}),
+            serde_json::json!({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "call_1", "type": "function",
+                                "function": {"name": "search_plans", "arguments": "{}"}}],
+                responses::OUTPUT_ITEMS_KEY: [{"type": "reasoning", "id": "rs_1", "encrypted_content": "enc"}],
+            }),
+            serde_json::json!({"role": "tool", "tool_call_id": "call_1", "content": "[]"}),
+        ];
+        let (tx, _rx) = mpsc::channel::<Result<Event, AppError>>(16);
+        let outcome = stream_research_turn(
+            &reqwest::Client::new(),
+            &ctx,
+            &ResearchConfig::defaults(false),
+            "system prompt",
+            &history,
+            &[],
+            &tx,
+            &mut String::new(),
+            ThinkingDisclosure::Open,
+        )
+        .await
+        .expect("the chat fallback should serve the round");
+
+        assert_eq!(outcome.content, "ok");
+        assert_eq!(outcome.provider, "cerebras");
+        assert!(outcome.output_items.is_none());
+        let sent: serde_json::Value = fallback.received_requests().await.unwrap()[0]
+            .body_json()
+            .unwrap();
+        assert_eq!(sent["messages"][0]["role"], "system");
+        assert_eq!(sent["messages"].as_array().unwrap().len(), 4);
+        assert!(sent["messages"][2]
+            .get(responses::OUTPUT_ITEMS_KEY)
+            .is_none());
+        assert_eq!(sent["messages"][2]["tool_calls"][0]["id"], "call_1");
+    }
+
+    #[tokio::test]
+    async fn a_round_failing_before_any_output_falls_back() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/responses"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(format!(
+                        "data: {}\n\n",
+                        serde_json::json!({"type": "error", "message": "Flex processing is temporarily unavailable."})
+                    )),
+            )
+            .mount(&server)
+            .await;
+        let fallback = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "text/event-stream")
+                    .set_body_string(
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n",
+                    ),
+            )
+            .mount(&fallback)
+            .await;
+        let mut ctx = openai_ctx(&server);
+        ctx.fallback_routes.push(crate::strategy::ChatRoute {
+            model: "gpt-oss-120b".to_string(),
+            provider: std::sync::Arc::new(crate::llm::OpenAiCompatibleProvider::new(
+                "cerebras",
+                &fallback.uri(),
+                "fallback-key",
+                reqwest::Client::new(),
+            )),
+        });
+        let (tx, _rx) = mpsc::channel::<Result<Event, AppError>>(16);
+        let outcome = stream_research_turn(
+            &reqwest::Client::new(),
+            &ctx,
+            &ResearchConfig::defaults(false),
+            "",
+            &[serde_json::json!({"role": "user", "content": "?"})],
+            &[],
+            &tx,
+            &mut String::new(),
+            ThinkingDisclosure::Open,
+        )
+        .await
+        .expect("the fallback should serve the round");
+        assert_eq!(outcome.provider, "cerebras");
+        assert_eq!(outcome.content, "ok");
     }
 
     #[tokio::test]
@@ -1639,6 +2011,7 @@ mod stream_integration_tests {
             &http,
             &ctx,
             &config,
+            "",
             &messages,
             &catalog,
             &tx,

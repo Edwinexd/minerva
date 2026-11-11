@@ -11,7 +11,11 @@
 //!    staff member named in their note, then a fusion of the workspace's
 //!    embedding index and a lexical ranking over every current plan's
 //!    text, so a missing embedder degrades the search instead of
-//!    emptying it. Nothing is searched when no file is attached.
+//!    emptying it. Nothing is searched when no file is attached. That
+//!    search only seeds the turn: with tool use on, the research phase
+//!    searches every current plan (`search_plans`) and pulls more into
+//!    the corpus (`get_plan`), up to [`MAX_PLANS`], and the reply may
+//!    compare any of them.
 //! 2. Find what SU's rulebook says: excerpts searched in the rule
 //!    documents alone (credit transfer in general, then the staff
 //!    member's note), so the plans never crowd them out.
@@ -44,8 +48,17 @@ use uuid::Uuid;
 use super::{common, GenerationContext};
 use minerva_app_core::syllabus_facts::PlanModule;
 
-/// Plans compared per assessment. Each costs a few thousand tokens.
+/// Plans the turn's opening search puts in front of the model. Each costs
+/// a few thousand tokens.
 const MAX_CANDIDATES: usize = 5;
+
+/// Plans a turn may hold once its research phase has pulled in more with
+/// `get_plan`.
+const MAX_PLANS: usize = 10;
+
+/// Plans one `search_plans` call lists by default, and at most.
+const SEARCH_PLANS_DEFAULT: usize = 8;
+const SEARCH_PLANS_MAX: usize = 15;
 
 /// Retrieved chunks per attachment for the semantic ranking.
 const RETRIEVAL_CHUNKS: i32 = 30;
@@ -329,6 +342,22 @@ pub struct Corpus {
     rules: Vec<RuleExcerpt>,
 }
 
+impl Corpus {
+    fn has_plan(&self, code: &str) -> bool {
+        self.plans.iter().any(|p| p.code == code)
+    }
+
+    /// Add a plan the research phase pulled in; false once the corpus
+    /// holds [`MAX_PLANS`].
+    fn add_plan(&mut self, plan: PlanDoc) -> bool {
+        if self.plans.len() >= MAX_PLANS {
+            return false;
+        }
+        self.plans.push(plan);
+        true
+    }
+}
+
 /// Read the corpus: the attached syllabuses, the DSV plans that may
 /// correspond to them and SU's rules. The plans are only searched when a
 /// file is attached, since without one there is nothing to compare.
@@ -539,10 +568,25 @@ async fn find_candidates(
         .map(|e| common::outcome_excerpt(&e.text, 2_000).to_string())
         .collect();
 
+    for code in rank_plans(ctx, &queries).await? {
+        if !ordered.contains(&code) {
+            ordered.push(code);
+        }
+    }
+    ordered.truncate(MAX_CANDIDATES);
+    Ok(ordered)
+}
+
+/// Every current plan matching `queries`, best first: the embedding index
+/// and BM25 over the plans' text, fused by rank.
+async fn rank_plans(
+    ctx: &GenerationContext,
+    queries: &[String],
+) -> Result<Vec<String>, sqlx::Error> {
     let mut fused: HashMap<String, f64> = HashMap::new();
     for ranking in [
-        semantic_ranking(ctx, &queries).await?,
-        lexical_ranking(ctx, &queries).await?,
+        semantic_ranking(ctx, queries).await?,
+        lexical_ranking(ctx, queries).await?,
     ] {
         for (rank, code) in ranking.iter().enumerate() {
             *fused.entry(code.clone()).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
@@ -550,13 +594,7 @@ async fn find_candidates(
     }
     let mut by_score: Vec<(String, f64)> = fused.into_iter().collect();
     by_score.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    for (code, _) in by_score {
-        if !ordered.contains(&code) {
-            ordered.push(code);
-        }
-    }
-    ordered.truncate(MAX_CANDIDATES);
-    Ok(ordered)
+    Ok(by_score.into_iter().map(|(code, _)| code).collect())
 }
 
 /// Upper-case tokens of a note that look like a course code or Daisy
@@ -796,6 +834,163 @@ async fn load_plans(
         });
     }
     Ok(out)
+}
+
+// Research tools
+
+/// The plan tools a credit transfer turn's research phase adds to the
+/// shared catalog. The opening search only seeds the corpus; these let
+/// the model look past it and pull any current DSV plan into the
+/// comparison.
+pub(crate) fn tool_specs() -> Vec<serde_json::Value> {
+    vec![
+        serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "search_plans",
+                "description": "Search every current DSV course plan for ones matching a topic, a set of learning outcomes or a course name. Returns plan codes with name, credits, level and the start of their outcomes, best match first, and whether each is already among the plans you compare. Search again with other wording (each external course, each topic it covers, Swedish and English) before concluding no other DSV course corresponds.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "Topic, outcomes or course name to match DSV plans against."},
+                        "k": {"type": "integer", "description": "Max plans to return (1-15).", "default": SEARCH_PLANS_DEFAULT, "minimum": 1, "maximum": SEARCH_PLANS_MAX}
+                    },
+                    "required": ["query"]
+                }
+            }
+        }),
+        serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "get_plan",
+                "description": "Add one DSV course plan to the plans you compare, by its course code (e.g. IB133N) or Daisy designation (e.g. PROG1). Its full text then appears under the DSV course plans in your instructions, and the reply may compare it or rule it out.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "code": {"type": "string", "description": "Course code or designation."}
+                    },
+                    "required": ["code"]
+                }
+            }
+        }),
+    ]
+}
+
+pub(crate) fn is_tool(name: &str) -> bool {
+    matches!(name, "search_plans" | "get_plan")
+}
+
+#[derive(Deserialize)]
+struct SearchPlansArgs {
+    query: String,
+    #[serde(default)]
+    k: Option<usize>,
+}
+
+#[derive(Deserialize)]
+struct GetPlanArgs {
+    code: String,
+}
+
+/// Run one of [`tool_specs`]. `get_plan` grows `corpus`, which the
+/// research prompt, the writeup and the check of the reply all read.
+pub(crate) async fn run_tool(
+    ctx: &GenerationContext,
+    corpus: &mut Corpus,
+    name: &str,
+    args: &str,
+) -> Result<String, super::tools::ToolError> {
+    use super::tools::ToolError;
+    let tool: &'static str = if name == "get_plan" {
+        "get_plan"
+    } else {
+        "search_plans"
+    };
+    let backend = |e: sqlx::Error| ToolError::Backend {
+        tool,
+        reason: e.to_string(),
+    };
+    let bad_args = |e: serde_json::Error| ToolError::BadArgs {
+        tool,
+        reason: e.to_string(),
+    };
+    match name {
+        "search_plans" => {
+            let args: SearchPlansArgs = serde_json::from_str(args).map_err(bad_args)?;
+            let k = args
+                .k
+                .unwrap_or(SEARCH_PLANS_DEFAULT)
+                .clamp(1, SEARCH_PLANS_MAX);
+            let mut codes = rank_plans(ctx, &[args.query]).await.map_err(backend)?;
+            codes.truncate(k);
+            let plans = load_plans(ctx, &codes).await.map_err(backend)?;
+            let results: Vec<serde_json::Value> = plans
+                .iter()
+                .map(|p| {
+                    let mut v = plan_facts(p);
+                    v["outcomes"] = common::outcome_excerpt(&p.text, 300).trim().into();
+                    v["in_comparison"] = corpus.has_plan(&p.code).into();
+                    v
+                })
+                .collect();
+            Ok(serde_json::json!({ "plans": results }).to_string())
+        }
+        "get_plan" => {
+            let args: GetPlanArgs = serde_json::from_str(args).map_err(bad_args)?;
+            let wanted = args.code.trim().to_ascii_uppercase();
+            let codes = minerva_db::queries::syllabus_archive::resolve_codes(&ctx.db, &[wanted])
+                .await
+                .map_err(backend)?;
+            let plans = load_plans(ctx, &codes).await.map_err(backend)?;
+            if plans.is_empty() {
+                return Err(ToolError::BadArgs {
+                    tool,
+                    reason: format!("no current DSV plan has the code '{}'", args.code),
+                });
+            }
+            let mut added = Vec::new();
+            let mut present = Vec::new();
+            let mut over = Vec::new();
+            for p in plans {
+                let code = p.code.clone();
+                if corpus.has_plan(&code) {
+                    present.push(code);
+                } else if corpus.add_plan(p) {
+                    added.push(code);
+                } else {
+                    over.push(code);
+                }
+            }
+            let mut out = serde_json::json!({
+                "added": added,
+                "already_compared": present,
+                "plans": corpus.plans.iter().filter(|p| added.contains(&p.code)).map(|p| {
+                    let mut v = plan_facts(p);
+                    v["outcomes"] = common::outcome_excerpt(&p.text, 1_500).trim().into();
+                    v
+                }).collect::<Vec<_>>(),
+            });
+            if !over.is_empty() {
+                out["not_added"] = serde_json::json!({
+                    "codes": over,
+                    "reason": format!("the comparison already holds {MAX_PLANS} plans"),
+                });
+            }
+            Ok(out.to_string())
+        }
+        _ => Err(ToolError::UnknownTool(name.to_string())),
+    }
+}
+
+/// A plan's archive facts as a tool reports them.
+fn plan_facts(p: &PlanDoc) -> serde_json::Value {
+    serde_json::json!({
+        "code": p.code,
+        "name": p.name,
+        "credits": p.ects,
+        "level": p.level,
+        "version": p.valid_from,
+    })
 }
 
 // Rule excerpts
@@ -1783,6 +1978,34 @@ mod tests {
             "comparison"
         );
         assert!(schema["properties"]["comparison"]["properties"]["candidates"].is_object());
+    }
+
+    #[test]
+    fn the_research_phase_grows_the_corpus_up_to_its_cap() {
+        let mut corpus = Corpus {
+            externals: vec![external()],
+            plans: vec![plan("IB133N", 2)],
+            rules: Vec::new(),
+        };
+        assert!(corpus.has_plan("IB133N"));
+        assert!(!corpus.has_plan("IB440C"));
+        for i in 1..MAX_PLANS {
+            assert!(corpus.add_plan(plan(&format!("IB{i:03}C"), 2)));
+        }
+        assert_eq!(corpus.plans.len(), MAX_PLANS);
+        assert!(!corpus.add_plan(plan("IB999C", 2)));
+        assert!(system_prompt(&None, None, &corpus).contains("=== Plan IB009C:"));
+    }
+
+    #[test]
+    fn the_plan_tools_are_offered_and_recognised() {
+        let names: Vec<String> = tool_specs()
+            .iter()
+            .map(|t| t["function"]["name"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(names, ["search_plans", "get_plan"]);
+        assert!(names.iter().all(|n| is_tool(n)));
+        assert!(!is_tool("semantic_search"));
     }
 
     #[test]

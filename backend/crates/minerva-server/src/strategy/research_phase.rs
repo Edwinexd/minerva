@@ -139,6 +139,10 @@ pub struct ResearchOutput {
     /// disclosure can render "Thought for Ns" on past messages, not
     /// just the one currently streaming.
     pub duration_ms: i64,
+    /// A credit transfer turn's corpus with every plan `get_plan` pulled
+    /// in, for the writeup and the check of its reply. `None` in every
+    /// other kind.
+    pub corpus: Option<super::credit_transfer::Corpus>,
 }
 
 /// One tool-call record persisted on the message. Mirrors the
@@ -313,7 +317,13 @@ pub async fn run(
         orphaned_doc_ids,
     };
 
-    let catalog = tools::assemble_catalog(catalog_flags);
+    // A credit transfer turn also gets the plan tools, which grow its
+    // own copy of the corpus; the prompt is rebuilt from it every round.
+    let mut corpus = ctx.corpus.clone();
+    let mut catalog = tools::assemble_catalog(catalog_flags);
+    if corpus.is_some() {
+        catalog.extend(super::credit_transfer::tool_specs());
+    }
 
     // Chunk accumulator: starts with the caller-provided seed and
     // grows monotonically as tool calls and FLARE retrievals
@@ -390,7 +400,7 @@ pub async fn run(
         }
         turns += 1;
 
-        let system = build_research_system_prompt(ctx, &chunks);
+        let system = build_research_system_prompt(ctx, &chunks, corpus.as_ref());
         let messages = compose_messages(&system, &history_messages);
 
         let outcome = match stream_research_turn(
@@ -482,9 +492,26 @@ pub async fn run(
                     if !disclosure.withheld() {
                         emit_tool_call(tx, &call.name, &args_value).await;
                     }
-                    match tools::dispatch(&call.name, &call.arguments, &dispatch_ctx, catalog_flags)
-                        .await
-                    {
+                    let dispatched = match corpus.as_mut() {
+                        Some(c) if super::credit_transfer::is_tool(&call.name) => {
+                            super::credit_transfer::run_tool(ctx, c, &call.name, &call.arguments)
+                                .await
+                                .map(|model_message| tools::ToolOutcome {
+                                    chunks: Vec::new(),
+                                    model_message,
+                                })
+                        }
+                        _ => {
+                            tools::dispatch(
+                                &call.name,
+                                &call.arguments,
+                                &dispatch_ctx,
+                                catalog_flags,
+                            )
+                            .await
+                        }
+                    };
+                    match dispatched {
                         Ok(outcome) => {
                             tool_log.push(ToolLogEntry {
                                 name: call.name.clone(),
@@ -672,6 +699,7 @@ pub async fn run(
         flare_injections,
         stop_reason,
         duration_ms,
+        corpus,
     }
 }
 
@@ -711,23 +739,31 @@ struct PendingToolCall {
     arguments: String,
 }
 
-fn build_research_system_prompt(ctx: &GenerationContext, chunks: &[RagChunk]) -> String {
-    let base = common::build_system_prompt(
-        &ctx.course_name,
-        &ctx.custom_prompt,
-        chunks,
-        ctx.prompt_frame(),
-    );
-    if ctx.corpus.is_some() {
+fn build_research_system_prompt(
+    ctx: &GenerationContext,
+    chunks: &[RagChunk],
+    corpus: Option<&super::credit_transfer::Corpus>,
+) -> String {
+    let frame = common::PromptFrame {
+        carryover: ctx.carryover.as_deref(),
+        corpus,
+    };
+    let base = common::build_system_prompt(&ctx.course_name, &ctx.custom_prompt, chunks, frame);
+    if corpus.is_some() {
         return format!(
             "{base}\n\n## Research phase (you are the FIRST of two agents)\n\
             You are the RESEARCH agent in a two-step pipeline. A separate WRITEUP \n\
             agent composes the reply the staff member sees, using what you gather \n\
             here. They will never read this phase.\n\
             \n\
-            Call tools (`keyword_search`, `semantic_search`, `list_documents`, \n\
-            `get_document_chunks`) for anything the plans and rule excerpts in your \n\
-            instructions do not already settle, then emit a SHORT bulleted handoff: \n\
+            The DSV course plans in your instructions are only what an opening \n\
+            search found; they are not every plan that may correspond. When the \n\
+            files are to be compared with DSV courses, call `search_plans` for each \n\
+            external course and each distinct topic it covers (try Swedish and \n\
+            English wording), and `get_plan` every plan that may overlap so the \n\
+            reply can compare it. Use `keyword_search`, `semantic_search`, \n\
+            `list_documents` and `get_document_chunks` for rules and anything else \n\
+            your instructions do not settle. Then emit a SHORT bulleted handoff: \n\
             at most 5 bullets, one fact each, no prose.\n\
             \n\
             Never write the staff-facing reply here.",

@@ -567,6 +567,7 @@ teacher checks read the same view.
     it, up to five) with their archive facts and full text, and up to six
     rulebook excerpts (credit transfer in general, then the note, searched
     in the rule documents alone). No plan search when no file is attached.
+    That plan search is only the seed, like a course's seed chunks.
   - The prompt builder returns `credit_transfer::system_prompt` when the
     frame carries a corpus: the staff persona, the two reply formats, the
     owner's instructions, the carryover, then attachments, plans and
@@ -584,8 +585,13 @@ teacher checks read the same view.
     chat by its external course when the comparison opens it). So every
     strategy that can answer that kind posts it the same way.
   - Tools stay available: `tool_use_enabled` runs the research phase over
-    the workspace's documents and rules, and the writeup gets the corpus
-    prompt plus the findings. FLARE's restart loop is the exception and is
+    the workspace's documents and rules, plus two plan tools of its own
+    (`credit_transfer::tool_specs`): `search_plans` runs the same fused
+    ranking over every current plan for any query, and `get_plan` adds a
+    plan to the turn's corpus (up to ten). The research prompt is rebuilt
+    from that growing corpus each round, and the writeup and the check of
+    the comparison read it too, so a plan the loop found is compared like
+    a seeded one. The writeup gets the corpus prompt plus the findings. FLARE's restart loop is the exception and is
     skipped for this kind: it steers extra retrieval by decoding logprobs
     from a prose answer as it streams.
   - A comparison is checked before it is kept: unknown plan codes are

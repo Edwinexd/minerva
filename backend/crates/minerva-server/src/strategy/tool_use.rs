@@ -111,7 +111,7 @@ fn per_response_token_cap(daily_token_budget: i64) -> i64 {
 /// `simple::run` and `flare::run` when `ctx.tool_use_enabled` is
 /// true.
 pub async fn run(
-    ctx: GenerationContext,
+    mut ctx: GenerationContext,
     use_logprobs: bool,
     tx: mpsc::Sender<Result<Event, AppError>>,
 ) {
@@ -349,6 +349,11 @@ pub async fn run(
     } else {
         &research.transcript
     };
+    // Plans the research phase pulled in are compared and checked like
+    // the ones the opening search found.
+    if let Some(corpus) = research.corpus.take() {
+        ctx.corpus = Some(corpus);
+    }
     let mut usage = std::mem::take(&mut research.usage);
     let writeup_text = match writeup::run(
         &ctx,

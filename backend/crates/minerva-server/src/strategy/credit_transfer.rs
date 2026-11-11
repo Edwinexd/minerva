@@ -347,6 +347,22 @@ impl Corpus {
         self.plans.iter().any(|p| p.code == code)
     }
 
+    /// The tool event recording the opening plan search: the plans it
+    /// gave the turn, best first.
+    pub(crate) fn opening_search_record(&self) -> super::research_phase::ToolEventRecord {
+        let n = self.plans.len();
+        super::research_phase::ToolEventRecord {
+            name: "plan_search".to_string(),
+            args: serde_json::json!({ "trigger": "attached_syllabus" }),
+            result_summary: if n == 1 {
+                "1 plan".to_string()
+            } else {
+                format!("{n} plans")
+            },
+            result: self.plans.iter().map(plan_facts).collect(),
+        }
+    }
+
     /// Add a plan the research phase pulled in; false once the corpus
     /// holds [`MAX_PLANS`].
     fn add_plan(&mut self, plan: PlanDoc) -> bool {
@@ -1995,6 +2011,10 @@ mod tests {
         assert_eq!(corpus.plans.len(), MAX_PLANS);
         assert!(!corpus.add_plan(plan("IB999C", 2)));
         assert!(system_prompt(&None, None, &corpus).contains("=== Plan IB009C:"));
+        let record = corpus.opening_search_record();
+        assert_eq!(record.name, "plan_search");
+        assert_eq!(record.result_summary, format!("{MAX_PLANS} plans"));
+        assert_eq!(record.result[0]["code"], "IB133N");
     }
 
     #[test]

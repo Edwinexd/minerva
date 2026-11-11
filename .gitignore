@@ -34,3 +34,6 @@ terraform/*.tfvars
 # throwaway document store the a11y backend writes to. Both rebuilt on demand
 # by `npm run pa11y:full`.
 frontend/.a11y/
+
+# Credit transfer eval output (`scripts/eval_credit_transfer.py`)
+eval-runs/

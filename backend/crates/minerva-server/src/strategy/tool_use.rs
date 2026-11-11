@@ -169,15 +169,20 @@ pub async fn run(
     //    slip through). The records themselves are always persisted
     //    onto `tool_events` for the teacher dashboard regardless of
     //    whether we end up emitting live to the student.
-    let mut prelim_events: Vec<ToolEventRecord> = Vec::new();
-    prelim_events.push(build_server_retrieval_record(
-        "initial_retrieve",
-        serde_json::json!({
-            "query": ctx.user_content.clone(),
-            "trigger": "user_question",
-        }),
-        &rag.context,
-    ));
+    // A credit transfer turn's seed is its opening plan search, not
+    // chunks, so its record lists the plans that search put in front of
+    // the model.
+    let mut prelim_events: Vec<ToolEventRecord> = vec![match &ctx.corpus {
+        Some(corpus) => corpus.opening_search_record(),
+        None => build_server_retrieval_record(
+            "initial_retrieve",
+            serde_json::json!({
+                "query": ctx.user_content.clone(),
+                "trigger": "user_question",
+            }),
+            &rag.context,
+        ),
+    }];
 
     if ctx.kg_enabled {
         let extra = common::expand_context_via_graph(

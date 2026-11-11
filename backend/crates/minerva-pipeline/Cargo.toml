@@ -24,6 +24,6 @@ qdrant-client.workspace = true
 sha2.workspace = true
 hex.workspace = true
 pdf-extract = "0.12"
-scraper = "0.27"
+scraper = "0.29"
 
 async-trait = "0.1"

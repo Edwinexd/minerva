@@ -109,6 +109,22 @@ and axe disagree here, and axe wins because the region is otherwise
 unreachable by keyboard. See the chat transcript in `chat-surface.tsx`
 for the canonical shape.
 
+## Links resolve
+
+`frontend/src/test/links.test.ts` reads every string literal in the
+frontend (TypeScript AST) and the backend crates (a small Rust lexer)
+that is a path on Minerva's host, and fails unless it is a page in the
+SPA route tree, a file in `frontend/public/`, or a path the backend
+serves (`/api`, `/mcp`, `/.well-known`, `lti::public_router`).
+Interpolated values may fill any one segment. API paths are not checked
+against the backend router. A path-like string that is not a link (file
+path, LLM provider endpoint) goes in its `NOT_LINKS` with a reason.
+Rendered links are checked too: `routes.test.tsx` (every redirect, the
+embed header) and an `afterEach` in `pages.a11y.test.tsx`, both with
+exact matching, since a wrong id value (`/workspaces/courses/{id}`) is
+invisible statically. The `backend-links` pre-commit hook runs the scan
+on Rust changes.
+
 ## Container Image
 
 - **Registry:** ghcr.io/edwinexd/minerva (private)

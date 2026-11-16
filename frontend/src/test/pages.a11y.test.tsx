@@ -15,7 +15,7 @@
  */
 import type { ReactElement } from "react"
 import { createElement } from "react"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { I18nextProvider } from "react-i18next"
 import { render } from "@testing-library/react"
@@ -23,6 +23,13 @@ import i18n from "i18next"
 
 import "@/i18n"
 import { axe } from "./a11y"
+import { expectLinksResolve } from "./links"
+
+// Every page rendered here also has to link only to pages that exist. Runs
+// before the shared cleanup unmounts the tree.
+afterEach(() => {
+  expectLinksResolve()
+})
 
 // ── Module mocks ────────────────────────────────────────────────────────
 
@@ -37,17 +44,21 @@ vi.mock("@tanstack/react-router", async (importOriginal) => {
   ])
   const Link = ({
     to,
+    params,
     children,
     ...rest
-  }: { to?: unknown; children?: React.ReactNode } & Record<string, unknown>) => {
+  }: { to?: unknown; params?: unknown; children?: React.ReactNode } & Record<string, unknown>) => {
     const domProps = Object.fromEntries(
       Object.entries(rest).filter(([k]) => !ROUTER_PROPS.has(k)),
     )
-    return createElement(
-      "a",
-      { href: typeof to === "string" ? to : "#", ...domProps },
-      children,
-    )
+    // Fill `$param` segments like the real Link, so the hrefs can be
+    // checked against the route tree.
+    const values = (params ?? {}) as Record<string, string>
+    const href =
+      typeof to === "string"
+        ? to.replace(/\$([A-Za-z_]+)/g, (_, name: string) => encodeURIComponent(values[name] ?? `$${name}`))
+        : "#"
+    return createElement("a", { href, ...domProps }, children)
   }
   return {
     ...actual,

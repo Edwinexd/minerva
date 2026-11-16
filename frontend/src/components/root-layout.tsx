@@ -1,4 +1,4 @@
-import { Link, Outlet } from "@tanstack/react-router"
+import { Link, Outlet, useMatch } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { devConfigQuery, userQuery } from "@/lib/queries"
 import { canManageSiteIntegrations, isCourseTeacher, isTeacherOrAbove } from "@/lib/roles"
@@ -8,6 +8,7 @@ import { useState, useEffect, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import { LanguageSwitcher } from "@/components/language-switcher"
 import { useEmbedNav } from "@/lib/embed-nav"
+import { chatLink } from "@/lib/workspace-routes"
 import { ThemeToggle } from "@/components/theme-toggle"
 
 interface EmbedMe {
@@ -34,15 +35,20 @@ export function RootLayout() {
   // must not trigger a Shib fetch. Same treatment as the bind picker.
   const isLtiSetup = /^\/lti\/(setup|platforms)\//.test(window.location.pathname)
 
+  // The course id comes from the router's match, never from splitting the
+  // pathname: the embed address has moved before (`/embed/{id}` to
+  // `/embed/courses/{id}`), and a split then read "courses" as the id.
+  const embedCourseId = useMatch({ from: "/embed/courses/$courseId", shouldThrow: false })
+    ?.params.courseId
   const embedParams = useMemo(() => {
-    if (!isEmbed) return null
+    if (!isEmbed || !embedCourseId) return null
     const params = new URLSearchParams(window.location.search)
     return {
       token: params.get("token"),
       ltiClientId: params.get("lti_client_id"),
-      courseId: window.location.pathname.split("/embed/")[1]?.split("?")[0],
+      courseId: embedCourseId,
     }
-  }, [isEmbed])
+  }, [isEmbed, embedCourseId])
 
   const { data: user } = useQuery({ ...userQuery, enabled: !isEmbed && !isLtiBind && !isLtiSetup })
   const { data: devConfig } = useQuery({
@@ -66,12 +72,9 @@ export function RootLayout() {
   // and dev. Deep-link to the open chat when there is one; otherwise the
   // course's new-chat route, which is where a fresh embed session starts.
   const { conversationId: embedConversationId } = useEmbedNav()
-  const embedCourseHref = embedParams?.courseId
-    ? `/workspaces/${embedParams.courseId}/conversations/${embedConversationId ?? "new"}`
-    : "/"
-  const embedTeacherHref = embedParams?.courseId
-    ? `/teacher/workspaces/${embedParams.courseId}`
-    : null
+  const embedCourseLink = embedParams
+    ? chatLink(embedParams.courseId, embedConversationId)
+    : ({ to: "/" } as const)
 
   return (
     <div className={`${isEmbed ? "h-dvh" : "min-h-screen"} bg-background text-foreground flex flex-col`}>
@@ -86,10 +89,10 @@ export function RootLayout() {
       <header className="border-b px-4 sm:px-6 py-4 print:hidden">
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 max-w-7xl mx-auto min-w-0">
           {isEmbed ? (
-            <a href={embedCourseHref} target="_blank" rel="noopener noreferrer" className="text-xl font-bold tracking-tight hover:opacity-80 flex items-center gap-1.5">
+            <Link {...embedCourseLink} preload={false} target="_blank" rel="noopener noreferrer" className="text-xl font-bold tracking-tight hover:opacity-80 flex items-center gap-1.5">
               <img src="/favicon.svg" alt="" className="w-6 h-6" />
               Minerva <ExternalLink className="w-4 h-4" />
-            </a>
+            </Link>
           ) : (
             <Link to="/" className="text-xl font-bold tracking-tight hover:opacity-80 flex items-center gap-2">
               <img src="/favicon.svg" alt="" className="w-6 h-6" />
@@ -130,16 +133,18 @@ export function RootLayout() {
                 {user.display_name || user.eppn}
               </span>
             ) : null}
-            {isEmbed && isCourseTeacher(embedMe?.course_role) && embedTeacherHref && (
-              <a
-                href={embedTeacherHref}
+            {isEmbed && isCourseTeacher(embedMe?.course_role) && embedParams && (
+              <Link
+                to="/teacher/workspaces/$courseId"
+                params={{ courseId: embedParams.courseId }}
+                preload={false}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-muted-foreground hover:text-foreground flex items-center gap-1"
               >
                 {t("nav.teacherView")}
                 <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
-              </a>
+              </Link>
             )}
             {isEmbed && embedMe && (
               <span className="text-muted-foreground">

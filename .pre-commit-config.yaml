@@ -152,6 +152,17 @@ repos:
         pass_filenames: false
         files: ^frontend/(src/.*\.(ts|tsx)|package(-lock)?\.json|vite(st)?\.config\.ts|tsconfig.*\.json)$
 
+      - id: backend-links
+        name: backend links resolve to frontend pages
+        # links.test.ts also reads the backend's Rust sources: every path it
+        # hands a browser (redirects, invite links, LTI launches) has to be
+        # a page in the SPA's route tree. A frontend change runs it as part
+        # of vitest-a11y above; this covers a backend-only change.
+        entry: bash -c 'cd frontend && npx vitest run src/test/links.test.ts'
+        language: system
+        pass_filenames: false
+        files: ^backend/crates/.*\.rs$
+
       - id: cargo-fmt
         name: cargo fmt
         entry: bash -c 'cd backend && cargo fmt --all -- --check'

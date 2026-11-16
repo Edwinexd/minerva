@@ -10,6 +10,7 @@ Requires: SU_USERNAME, SU_PASSWORD, MINERVA_API_URL, MINERVA_SERVICE_API_KEY
 """
 
 import os
+import sys
 
 import requests
 from dsv_wrapper import PlayClient, PresentationNotReadyError
@@ -38,8 +39,12 @@ def sanitize_filename(title: str, fallback: str) -> str:
 def push_catalog(
     client: PlayClient,
     session: MinervaSession,
-) -> None:
-    """Fetch the union of courses across CATALOG_TAGS and push to Minerva."""
+) -> bool:
+    """Fetch the union of courses across CATALOG_TAGS and push to Minerva.
+
+    Returns False when no tag yielded any course. Play always lists courses
+    under these tags, so an empty union means scraping broke.
+    """
     union: dict[str, str] = {}
     for tag in CATALOG_TAGS:
         try:
@@ -50,7 +55,7 @@ def push_catalog(
 
     if not union:
         print("Catalog push skipped: no courses discovered.")
-        return
+        return False
 
     entries = [{"code": code, "name": name} for code, name in sorted(union.items())]
     resp = session.put("/api/service/play-courses", json=entries)
@@ -60,14 +65,17 @@ def push_catalog(
         f"Catalog push: {body.get('submitted')} submitted, "
         f"{body.get('upserted')} upserted."
     )
+    return True
 
 
 def discover_designations(
     client: PlayClient,
     session: MinervaSession,
-) -> None:
+) -> bool:
     """Discovery phase: for each watched designation, create URL docs for any
     presentations that aren't already tracked in the owning course.
+
+    Returns False when no designation could be listed at all.
     """
     resp = session.get("/api/service/play-designations")
     resp.raise_for_status()
@@ -75,10 +83,11 @@ def discover_designations(
 
     if not designations:
         print("No watched designations.")
-        return
+        return True
 
     print(f"Discovering presentations for {len(designations)} designation(s)...")
 
+    failed = 0
     for des in designations:
         des_id = des["id"]
         course_id = des["course_id"]
@@ -93,6 +102,7 @@ def discover_designations(
                 f"/api/service/play-designations/{des_id}/mark-synced",
                 json={"error": error_msg},
             )
+            failed += 1
             continue
 
         created = 0
@@ -127,6 +137,10 @@ def discover_designations(
             f"/api/service/play-designations/{des_id}/mark-synced",
             json={},
         )
+
+    if failed:
+        print(f"Failed to list {failed} of {len(designations)} designation(s).")
+    return failed < len(designations)
 
 
 # Cursor page size. The backend caps this at 1024; 512 is the
@@ -288,19 +302,24 @@ def main() -> None:
 
     with session, PlayClient(username=su_username, password=su_password) as client:
         # Phase 0: refresh Minerva's catalog of known designations (for
-        # teacher-facing autocomplete). Best-effort; failure doesn't abort.
+        # teacher-facing autocomplete). A failure doesn't stop the later
+        # phases, but fails the run once they are done.
         try:
-            push_catalog(client, session)
+            catalog_ok = push_catalog(client, session)
         except Exception as e:
             print(f"Catalog push failed: {e}")
+            catalog_ok = False
 
         # Phase 1: discover new presentations for watched designations.
-        discover_designations(client, session)
+        discovery_ok = discover_designations(client, session)
 
         # Phase 2: fetch transcripts for awaiting_transcript docs (including any
         # newly created by phase 1 that have already been triaged).
         fetch_pending_transcripts(client, session)
 
+    if not (catalog_ok and discovery_ok):
+        print("Play scraping failed, see above.")
+        sys.exit(1)
     print("Done.")
 
 

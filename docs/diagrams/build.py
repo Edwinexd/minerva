@@ -579,7 +579,7 @@ def visual_extraction() -> graphviz.Digraph:
 
     with g.subgraph(name="cluster_olympus") as c:
         c.attr(label="Olympus (Slurm, L40S GPUs)", **CLUSTER_BASE)
-        _box(c, "gate", "forced-command SSH gates",
+        _box(c, "gate", "SSH gates",
              subtitle="slide-ocr-gate / ssh-gate")
         _box(c, "worker", "slide-ocr worker", icon="python",
              subtitle="Unlimited-OCR on vLLM,<BR/>CLIP ViT-B/32, at most 12 h")

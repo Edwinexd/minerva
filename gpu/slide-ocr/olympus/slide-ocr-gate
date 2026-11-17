@@ -1,5 +1,5 @@
 #!/bin/bash
-# What minerva-scheduler runs on the existing SU account over SSH
+# What minerva-scheduler runs on the `minerva` function account over SSH
 # (`ssh <svc>@olympus minerva-slide-ocr/olympus/slide-ocr-gate <verb> <arg>`):
 #
 #   submit <worker-uuid>   reads the worker's signed URL on stdin, stores it
@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Slurm account and partition of this SU account; site.env (not in
+# Slurm account and partition of this Olympus account; site.env (not in
 # git) can override them, e.g. SLURM_ACCOUNT=minerva.
 SLURM_ACCOUNT=slurm-staff
 SLURM_PARTITION=gpu
@@ -29,7 +29,7 @@ fi
 verb=$1
 arg=$2
 
-# scancel on a personal account must never cancel unrelated SU work.
+# scancel must only ever touch this account's Minerva workers.
 check_minerva_jobs() {
     local record owner name job
     local current_user

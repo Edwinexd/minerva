@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Trusted forced command installed OUTSIDE the deployable worker directory.
+"""Trusted gate installed OUTSIDE the deployable worker directory.
 
-authorized_keys uses restrict plus the absolute gate path and scheduler role.
-Use a separate deployment key with the same command and role `deploy`.
-Never eval SSH_ORIGINAL_COMMAND or allow an interactive shell/SFTP/scp.
+Role `deploy` validates and installs a worker archive; role `scheduler`
+runs one slide-ocr-gate verb. The command comes from SSH_ORIGINAL_COMMAND,
+so this also works as an authorized_keys forced command
+(`restrict,command="<gate> <role>"`). Never eval SSH_ORIGINAL_COMMAND.
 """
 
 import gzip

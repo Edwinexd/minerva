@@ -57,7 +57,12 @@ class Engines:
     def load(cls):
         from fastembed import ImageEmbedding
 
-        return cls(ocr=VllmOcr(), clip=ImageEmbedding(VISUAL_MODEL))
+        # FastEmbed defaults to /tmp/fastembed_cache: node-local, 4.9 GB,
+        # and owned by whichever account ran there first.
+        cache = Path.home() / ".cache" / "fastembed"
+        return cls(
+            ocr=VllmOcr(), clip=ImageEmbedding(VISUAL_MODEL, cache_dir=str(cache))
+        )
 
 
 def jpeg(image, long_side, quality):

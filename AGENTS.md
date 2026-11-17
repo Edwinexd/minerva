@@ -833,9 +833,10 @@ and Olympus setup in `gpu/slide-ocr/README.md`.
   ffmpeg frame grab, ~45 MiB per tesseract). Raise those together.
 - **Credentials.** SU credentials stay in GitHub Actions (and the
   operator's machine for local experiments); never put them on Olympus.
-  The existing SU account on Olympus is reached with a dedicated
-  forced-command scheduler key held only in the `minerva-slurm` k8s secret.
-  The `prod` GitHub environment holds a separate forced-command deploy key.
+  The `minerva` function account on Olympus is reached with one SSH key,
+  held in the `minerva-slurm` k8s secret and as `SLURM_SSH_PRIVATE_KEY` in
+  the `prod` GitHub environment. Its `authorized_keys` is root-owned and
+  the key has no forced command, so it is a shell on the account.
   Workers get nothing but grants signed with `MINERVA_HMAC_SECRET`
   (`minerva_app_core::visual_extraction`), scoped to one worker, one job
   attempt, or one figure image.
@@ -879,10 +880,9 @@ and Olympus setup in `gpu/slide-ocr/README.md`.
 - **Deploys.** Minerva's side ships with the normal pipeline. The worker
   code ships with `deploy-slide-ocr.yml` on every `master` push touching
   `gpu/slide-ocr/`: a tarball validated and installed by `olympus/ssh-gate` (ProxyJump
-  via `ci@minerva`), same SU account, with a separate forced-command deployment key. Workers build
+  via `ci@minerva`), same function account and key. Workers build
   their venv on first use, named by the requirements hash, so nothing on
-  Olympus is installed by hand beyond putting the key in the account's
-  `authorized_keys`.
+  Olympus is installed by hand beyond `ssh-gate` itself.
 - **vLLM 0.31 workarounds** live in `gpu/slide-ocr/ocr_vllm.py`: the v1
   model runner for the n-gram logits processor, an in-process engine plus
   a `tl.constexpr` rebinding for DeepEncoder's `LOG2E`, and the FlashInfer

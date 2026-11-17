@@ -199,9 +199,9 @@ Responsibilities and credentials:
 |---|---|---|
 | GitHub Actions `visual-extraction.yml` (every 20 min) | SU login, `MINERVA_SERVICE_API_KEY` | Play to Minerva (`scripts/fetch_lecture_videos.py`): offers every source's signed URLs (low-resolution probe variant, ~1080p download variant) with the download variant's HEAD size, JWT expiry as `download_deadline`, and timed VTT cues. Reads headers only, never media bytes. Only for slots Minerva grants. |
 | `minerva-fetcher` (`backend/crates/minerva-fetcher`) | Database and the staging volume only | Probes multi-source lectures for the slide source, downloads the chosen MP4 into staging in deadline order, removes orphaned staging files. Its image alone carries ffmpeg and tesseract. |
-| `minerva-scheduler` loop (`minerva_app_core::visual_extraction::tick`, every minute) | Restricted scheduler SSH key for the existing SU account (secret `minerva-slurm`) | Enqueues jobs, submits and monitors Slurm workers over SSH (`sbatch`, `sacct`, `scancel` through `olympus/slide-ocr-gate`), requeues work from dead workers, pushes figure vectors to Qdrant, exports `visual_extraction_*` metrics. |
+| `minerva-scheduler` loop (`minerva_app_core::visual_extraction::tick`, every minute) | SSH key for the `minerva` function account on Olympus (secret `minerva-slurm`) | Enqueues jobs, submits and monitors Slurm workers over SSH (`sbatch`, `sacct`, `scancel` through `olympus/slide-ocr-gate`), requeues work from dead workers, pushes figure vectors to Qdrant, exports `visual_extraction_*` metrics. |
 | `minerva-app` routes (`/api/service/visual-extraction/...`) | `MINERVA_HMAC_SECRET` | Fetch slots, source/deadline handoff, worker work queue, presigned source download and result upload, ingest. |
-| GitHub Actions `deploy-slide-ocr.yml` (push to `master` touching `gpu/slide-ocr/`) | Separate restricted deploy key for the same SU account, via `ci@minerva` | Streams the worker code to the forced-command deployment gate (`olympus/ssh-gate`). |
+| GitHub Actions `deploy-slide-ocr.yml` (push to `master` touching `gpu/slide-ocr/`) | The same key (`SLURM_SSH_PRIVATE_KEY`), via `ci@minerva` | Streams the worker code to the deployment gate (`olympus/ssh-gate deploy`), which validates the archive and installs only the production files. |
 | Slurm worker job (`gpu/slide-ocr/worker.py`, at most 12 h) | One worker-scoped signed URL valid for the job's lifetime | Pulls lectures/PDFs one at a time, detects slides, OCRs with Unlimited-OCR on vLLM, crops figures and embeds them with CLIP ViT-B/32 (FastEmbed), uploads the result. No long-lived secrets and no state. |
 
 Flow and backpressure:
@@ -286,7 +286,7 @@ Flow and backpressure:
   run until its token nears expiry. Audio flags are ignored.
 - **Workers pull, one item at a time.** The scheduler keeps up to
   `MINERVA_SLURM_MAX_WORKERS` (default 4) submitted while leasable work
-  exists, and the SU account's Slurm priorities decide when they run: a queued worker holds no work, and its grant allows
+  exists, and the function account's Slurm priorities decide when they run: a queued worker holds no work, and its grant allows
   three days of queueing on top of the 12-hour wall time. A worker asks `next`, gets the item's presigned source GET
   and result PUT, processes it, and exits when the queue is empty or its
   wall time is close. Olympus holds one source file per worker at a time.

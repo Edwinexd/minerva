@@ -1,7 +1,7 @@
 name: Deploy Slide OCR Worker
 
-# Ships gpu/slide-ocr to the existing SU account on Olympus: uploads a tarball and
-# sends it to the restricted olympus/ssh-gate to put it in place. Workers
+# Ships gpu/slide-ocr to the `minerva` function account on Olympus: uploads a tarball and
+# sends it to olympus/ssh-gate to put it in place. Workers
 # already running finish on the code they started with; the next one picks
 # up the new files, and builds a fresh venv first if the requirements
 # changed. The first run creates everything.
@@ -38,7 +38,7 @@ jobs:
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/minerva_ci
-          echo "${{ secrets.SLURM_DEPLOY_SSH_PRIVATE_KEY }}" > ~/.ssh/olympus
+          echo "${{ secrets.SLURM_SSH_PRIVATE_KEY }}" > ~/.ssh/olympus
           chmod 600 ~/.ssh/minerva_ci ~/.ssh/olympus
           ssh-keyscan minerva.dsv.su.se >> ~/.ssh/known_hosts 2>/dev/null
           echo "${{ secrets.SLURM_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
@@ -61,4 +61,6 @@ jobs:
             ssh -i ~/.ssh/olympus -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
               -J minerva.dsv.su.se "$SLURM_SSH_TARGET" "$@"
           }
-          olympus "minerva-slide-ocr-deploy $GITHUB_SHA" < "$RUNNER_TEMP/slide-ocr.tgz"
+          # The gate validates the archive and installs only the production files.
+          olympus "SSH_ORIGINAL_COMMAND='minerva-slide-ocr-deploy $GITHUB_SHA' ~/.local/lib/minerva/ssh-gate deploy" \
+            < "$RUNNER_TEMP/slide-ocr.tgz"

@@ -57,7 +57,7 @@ spec:
             # an Olympus worker), on the same hostPath as the documents.
             - name: MINERVA_VISUAL_STAGING_PATH
               value: "/data/visual-staging"
-            # existing SU account on Olympus for Slurm workers. The secret is
+            # `minerva` function account on Olympus for Slurm workers. The secret is
             # optional: without it (or with an empty target) the Slurm part
             # of the visual extraction loop stays off.
             - name: MINERVA_SLURM_SSH_TARGET

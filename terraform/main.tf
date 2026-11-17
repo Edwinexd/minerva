@@ -48,7 +48,7 @@ locals {
       MISTRAL_API_KEY: "${var.mistral_api_key}"
       MINERVA_SERVICE_API_KEY: "${var.minerva_service_api_key}"
     ---
-    # existing SU account on Olympus for the visual extraction scheduler loop.
+    # `minerva` function account on Olympus for the visual extraction scheduler loop.
     # Empty values leave the loop's Slurm part off.
     apiVersion: v1
     kind: Secret
@@ -95,8 +95,8 @@ resource "github_actions_environment_secret" "prod_ssh_private_key" {
   plaintext_value = var.ssh_private_key
 }
 
-# Existing SU account on Olympus. The scheduler key stays in k8s;
-# GitHub Actions receives only the separately restricted deployment key.
+# `minerva` function account on Olympus. One key, used by the scheduler (k8s)
+# and deploy-slide-ocr.yml (GitHub).
 resource "github_actions_environment_secret" "prod_slurm_ssh_target" {
   repository      = data.github_repository.repo.name
   environment     = github_repository_environment.prod.environment
@@ -140,10 +140,10 @@ resource "github_actions_secret" "su_password" {
   plaintext_value = var.su_password
 }
 
-resource "github_actions_environment_secret" "slurm_deploy_ssh_private_key" {
-  count           = var.slurm_deploy_ssh_private_key_path != "" ? 1 : 0
+resource "github_actions_environment_secret" "slurm_ssh_private_key" {
+  count           = local.slurm_ssh_private_key != "" ? 1 : 0
   repository      = data.github_repository.repo.name
   environment     = github_repository_environment.prod.environment
-  secret_name     = "SLURM_DEPLOY_SSH_PRIVATE_KEY"
-  plaintext_value = file(pathexpand(var.slurm_deploy_ssh_private_key_path))
+  secret_name     = "SLURM_SSH_PRIVATE_KEY"
+  plaintext_value = local.slurm_ssh_private_key
 }

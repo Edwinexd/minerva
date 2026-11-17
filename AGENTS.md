@@ -1188,6 +1188,23 @@ comparable turns that got no banner.
 
 Manages GitHub environment secrets for the `prod` environment. Generates `K8S_SECRETS` manifest from individual secret variables.
 
+Terraform is the only way a secret reaches prod. Never `kubectl edit` /
+`patch` / `create secret` a key into the cluster, and never rely on `.env`
+(local dev only; Terraform reads `terraform/terraform.tfvars` and nothing
+else). Every apply regenerates the whole `K8S_SECRETS` and every deploy
+re-applies it, so a hand-placed key is wiped on the next deploy and its
+feature switches off without an error (an empty provider key just leaves
+that provider unregistered; this took a Mistral-served course down in
+Nov 2026). A new key goes into `variables.tf` as a required variable with
+no empty default, and into `terraform.tfvars`.
+
+`deploy.yml`'s "Refuse to drop secret keys" step
+(`scripts/check_secret_removal.py`) compares the new `K8S_SECRETS` with
+the live secrets before applying and fails the deploy if a key that is
+non-empty on the cluster would be missing or empty. To remove a key on
+purpose, run the deploy manually with `allow_secret_removal` naming it
+(`gh workflow run deploy.yml -f allow_secret_removal=KEY`).
+
 ```bash
 cd terraform && terraform apply -var-file="secrets.tfvars"
 ```

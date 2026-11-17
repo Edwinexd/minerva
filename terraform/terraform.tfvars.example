@@ -26,7 +26,7 @@ minerva_hmac_secret = "generate with: openssl rand -base64 32"
 minerva_admins      = "edsu8469"
 cerebras_api_key    = "csk-..."
 openai_api_key      = "sk-proj-..."
-mistral_api_key     = "" # optional
+mistral_api_key     = "..."
 
 # Visual extraction: the minerva function account, one key for scheduler and deploys.
 slurm_ssh_target = "minerva@olympus.dsv.su.se"

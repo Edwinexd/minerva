@@ -79,10 +79,9 @@ variable "openai_api_key" {
 }
 
 variable "mistral_api_key" {
-  description = "Mistral API key; empty leaves the mistral LLM provider off"
+  description = "Mistral API key; required, because the course catalog serves models through it"
   type        = string
   sensitive   = true
-  default     = ""
 }
 
 variable "minerva_service_api_key" {

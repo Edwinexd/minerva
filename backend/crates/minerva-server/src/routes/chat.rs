@@ -1601,13 +1601,213 @@ pub(super) async fn run_chat_message(
     };
     let conv_id = conv.id;
 
+    let strategy_name = course.strategy.clone();
+
+    // Resolve the KG feature flag once per chat request and pin it
+    // into the strategy context. This both saves a DB lookup per
+    // partition call and guarantees a stable view across the run --
+    // an admin flipping the flag mid-conversation won't half-apply.
+    let kg_enabled = crate::feature_flags::course_kg_enabled(&state.db, workspace_id).await;
+    let reranking_enabled = crate::system_defaults::reranking_enabled(&state.db).await;
+
+    // Resolve the chat provider for this course's model from the
+    // `chat_models.provider` mapping (falling back to Cerebras for a
+    // model not in the catalog, e.g. a legacy row). The simple / writeup
+    // strategies are fully provider-agnostic (they call
+    // `provider.stream`). The bespoke FLARE / research loops are
+    // OpenAI-shaped and read the raw `(url, key)` from
+    // `openai_endpoint()`; for a non-OpenAI-compatible provider that is
+    // empty, but the config-save capability gate keeps FLARE off such
+    // models, and the catalog ships no tool-use Anthropic model, so those
+    // loops only ever run against OpenAI-compatible providers.
+    let provider_id = minerva_db::queries::chat_models::provider_of(&state.db, &course.model)
+        .await?
+        .unwrap_or_else(|| crate::llm::provider::PROVIDER_CEREBRAS.to_string());
+
+    // Build failover routes from models the admin has explicitly enabled.
+    // Capability filtering prevents a tool-use/FLARE turn from landing on
+    // a model that cannot execute the same strategy.
+    let default_model = minerva_db::queries::chat_models::current_default(&state.db)
+        .await?
+        .unwrap_or_default();
+    let mut fallback_routes = Vec::new();
+    for row in minerva_db::queries::chat_models::list_all(&state.db).await? {
+        if !row.enabled || row.model == course.model {
+            continue;
+        }
+        if course.tool_use_enabled && !row.supports_tool_use {
+            continue;
+        }
+        if course.strategy == "flare" && !row.supports_logprobs {
+            continue;
+        }
+        let Some(fallback_provider) = state.llm.get(&row.provider) else {
+            continue;
+        };
+        if course.tool_use_enabled && fallback_provider.openai_endpoint().is_none() {
+            continue;
+        }
+        fallback_routes.push(strategy::ChatRoute {
+            model: row.model,
+            provider: fallback_provider,
+        });
+    }
+    fallback_routes.sort_by_key(|route| {
+        let is_default = route.model != default_model;
+        (
+            is_default,
+            route.provider.id() == provider_id,
+            route.model.clone(),
+        )
+    });
+
+    // A course whose model's provider has no key on this deployment is
+    // served by its first fallback route rather than refused, so a
+    // missing key degrades the answer instead of taking the course down.
+    let (model, provider) = match state.llm.get(&provider_id) {
+        Some(provider) => (course.model.clone(), provider),
+        None if !fallback_routes.is_empty() => {
+            let route = fallback_routes.remove(0);
+            tracing::warn!(
+                "chat provider '{}' for model '{}' is not configured; serving workspace {} with '{}'",
+                provider_id,
+                course.model,
+                workspace_id,
+                route.model,
+            );
+            (route.model, route.provider)
+        }
+        None => {
+            return Err(AppError::Internal(format!(
+                "chat provider '{}' for model '{}' is not configured and no fallback route is enabled",
+                provider_id, course.model
+            )));
+        }
+    };
+    let (chat_base_url, chat_api_key) = provider
+        .openai_endpoint()
+        .map(|(url, key)| (url.to_string(), key.to_string()))
+        .unwrap_or_default();
+
+    // Resolve the model's billing rates once for this chat turn. Used here
+    // to derive the per-response token fail-safe and threaded into the
+    // strategy context so `common::finalize` reuses it for the cost metric
+    // rather than doing a second `rates_of` round-trip. `None` = unknown
+    // price (NULL rate) or model absent from the catalog.
+    let billing_rates = minerva_db::queries::chat_models::rates_of(&state.db, &model).await?;
+
+    // Convert the course's daily USD cap to a token budget for the
+    // tool-use / FLARE per-response fail-safe, at the model's blended
+    // (50/50) rate. 0 (no cap) or a free model -> 0 (no token cap).
+    let daily_token_budget: i64 = if course.daily_cost_limit_usd > rust_decimal::Decimal::ZERO {
+        match billing_rates {
+            Some((in_rate, out_rate)) => {
+                let blended = (in_rate + out_rate) / rust_decimal::Decimal::from(2);
+                if blended > rust_decimal::Decimal::ZERO {
+                    use rust_decimal::prelude::ToPrimitive;
+                    ((course.daily_cost_limit_usd * rust_decimal::Decimal::from(1_000_000))
+                        / blended)
+                        .to_i64()
+                        .unwrap_or(i64::MAX)
+                } else {
+                    0
+                }
+            }
+            None => {
+                // The course has a USD cap but its selected model is
+                // unpriced (NULL rate or absent from the catalog), so spend
+                // bills at $0 and the per-response token fail-safe is
+                // disabled. The enable-gate + price CHECK make this
+                // unreachable in steady state; it only happens when an admin
+                // has force-migrated the course onto a disabled, un-priced
+                // model. Surface it rather than running silently uncapped.
+                tracing::warn!(
+                    "course {} has a daily USD cap but model '{}' is unpriced; spend bills at $0 and the per-response token cap is disabled",
+                    workspace_id,
+                    model,
+                );
+                0
+            }
+        }
+    } else {
+        0
+    };
+
+    let workspace_kind =
+        minerva_core::models::WorkspaceKind::parse(&course.kind).ok_or_else(|| {
+            AppError::Internal(format!("workspace {workspace_id} has kind {}", course.kind))
+        })?;
+    // A credit transfer workspace answers every turn itself; see
+    // `strategy::run_strategy`. Course workspaces keep their configured
+    // strategy.
+    let rulebook_documents = if workspace_kind
+        == minerva_core::models::WorkspaceKind::CreditTransfer
+    {
+        minerva_db::queries::credit_transfer::rulebook_documents(&state.db, workspace_id).await?
+    } else {
+        Vec::new()
+    };
+
+    let ctx = strategy::GenerationContext {
+        course_name: course.name,
+        custom_prompt: course.system_prompt,
+        model,
+        temperature: course.temperature,
+        max_chunks: course.max_chunks,
+        min_score: course.min_score,
+        workspace_id,
+        conversation_id: conv_id,
+        user_id: conv.user_id,
+        provider,
+        fallback_routes,
+        chat_api_key,
+        chat_base_url,
+        utility: state.utility_model().await,
+        openai_api_key: state.config.openai_api_key.clone(),
+        embedding_provider: course.embedding_provider,
+        embedding_model: course.embedding_model,
+        embedding_version: course.embedding_version,
+        history: Vec::new(),
+        carryover: conv.carryover_summary.clone(),
+        workspace_kind,
+        rulebook_documents,
+        corpus: None,
+        user_content,
+        is_first_message: false,
+        daily_token_budget,
+        billing_rates,
+        db: state.db.clone(),
+        qdrant: Arc::clone(&state.qdrant),
+        fastembed: Arc::clone(&state.fastembed),
+        reranker: Arc::clone(&state.reranker),
+        reranker_model: course.reranker_model,
+        reranking_enabled,
+        kg_enabled,
+        tool_use_enabled: course.tool_use_enabled,
+        viewer_is_teacher,
+    };
+
+    // A credit transfer workspace reads its plan and rule corpus once per
+    // turn, before the stream opens, so the prompt, the reply and the check
+    // of that reply all see the same text.
+    let mut ctx = ctx;
+    if workspace_kind == minerva_core::models::WorkspaceKind::CreditTransfer {
+        ctx.corpus = Some(
+            strategy::credit_transfer::prepare(&ctx)
+                .await
+                .map_err(AppError::Internal)?,
+        );
+    }
+
+    // Everything above can still refuse the turn. The question is saved
+    // only now, so a refused turn leaves no unanswered message behind.
     let user_msg_id = Uuid::new_v4();
     minerva_db::queries::conversations::insert_message(
         &state.db,
         user_msg_id,
         conv_id,
         "user",
-        &user_content,
+        &ctx.user_content,
         None,
         None,
         None,
@@ -1635,10 +1835,10 @@ pub(super) async fn run_chat_message(
     // refetches the conversation once the stream closes, which is when
     // the nudge surfaces. If it ever loses that race the nudge simply
     // appears on the next fetch instead.
-    spawn_topic_switch_detection(state, &course, conv_id, user_msg_id, user_content.clone());
+    spawn_topic_switch_detection(state, &ctx, user_msg_id);
 
-    let history = minerva_db::queries::conversations::list_messages(&state.db, conv_id).await?;
-    let is_first_message = history.len() <= 1;
+    ctx.history = minerva_db::queries::conversations::list_messages(&state.db, conv_id).await?;
+    ctx.is_first_message = ctx.history.len() <= 1;
 
     let (tx, rx) = mpsc::channel::<Result<Event, AppError>>(32);
 
@@ -1654,15 +1854,6 @@ pub(super) async fn run_chat_message(
             .send(Ok(Event::default().data(payload.to_string())))
             .await;
     }
-
-    let strategy_name = course.strategy.clone();
-
-    // Resolve the KG feature flag once per chat request and pin it
-    // into the strategy context. This both saves a DB lookup per
-    // partition call and guarantees a stable view across the run --
-    // an admin flipping the flag mid-conversation won't half-apply.
-    let kg_enabled = crate::feature_flags::course_kg_enabled(&state.db, workspace_id).await;
-    let reranking_enabled = crate::system_defaults::reranking_enabled(&state.db).await;
 
     // Aegis: persist the verdict the student had on screen when
     // they pressed Send so it appears in the History panel for
@@ -1721,178 +1912,6 @@ pub(super) async fn run_chat_message(
                 }
             }
         }
-    }
-
-    // Resolve the chat provider for this course's model from the
-    // `chat_models.provider` mapping (falling back to Cerebras for a
-    // model not in the catalog, e.g. a legacy row). The simple / writeup
-    // strategies are fully provider-agnostic (they call
-    // `provider.stream`). The bespoke FLARE / research loops are
-    // OpenAI-shaped and read the raw `(url, key)` from
-    // `openai_endpoint()`; for a non-OpenAI-compatible provider that is
-    // empty, but the config-save capability gate keeps FLARE off such
-    // models, and the catalog ships no tool-use Anthropic model, so those
-    // loops only ever run against OpenAI-compatible providers.
-    let provider_id = minerva_db::queries::chat_models::provider_of(&state.db, &course.model)
-        .await?
-        .unwrap_or_else(|| crate::llm::provider::PROVIDER_CEREBRAS.to_string());
-    let provider = state.llm.get(&provider_id).ok_or_else(|| {
-        AppError::Internal(format!(
-            "chat provider '{}' for model '{}' is not configured",
-            provider_id, course.model
-        ))
-    })?;
-    let (chat_base_url, chat_api_key) = provider
-        .openai_endpoint()
-        .map(|(url, key)| (url.to_string(), key.to_string()))
-        .unwrap_or_default();
-
-    // Build failover routes from models the admin has explicitly enabled.
-    // Capability filtering prevents a tool-use/FLARE turn from landing on
-    // a model that cannot execute the same strategy.
-    let default_model = minerva_db::queries::chat_models::current_default(&state.db)
-        .await?
-        .unwrap_or_default();
-    let mut fallback_routes = Vec::new();
-    for row in minerva_db::queries::chat_models::list_all(&state.db).await? {
-        if !row.enabled || row.model == course.model {
-            continue;
-        }
-        if course.tool_use_enabled && !row.supports_tool_use {
-            continue;
-        }
-        if course.strategy == "flare" && !row.supports_logprobs {
-            continue;
-        }
-        let Some(fallback_provider) = state.llm.get(&row.provider) else {
-            continue;
-        };
-        if course.tool_use_enabled && fallback_provider.openai_endpoint().is_none() {
-            continue;
-        }
-        fallback_routes.push(strategy::ChatRoute {
-            model: row.model,
-            provider: fallback_provider,
-        });
-    }
-    fallback_routes.sort_by_key(|route| {
-        let is_default = route.model != default_model;
-        (
-            is_default,
-            route.provider.id() == provider_id,
-            route.model.clone(),
-        )
-    });
-
-    // Resolve the model's billing rates once for this chat turn. Used here
-    // to derive the per-response token fail-safe and threaded into the
-    // strategy context so `common::finalize` reuses it for the cost metric
-    // rather than doing a second `rates_of` round-trip. `None` = unknown
-    // price (NULL rate) or model absent from the catalog.
-    let billing_rates =
-        minerva_db::queries::chat_models::rates_of(&state.db, &course.model).await?;
-
-    // Convert the course's daily USD cap to a token budget for the
-    // tool-use / FLARE per-response fail-safe, at the model's blended
-    // (50/50) rate. 0 (no cap) or a free model -> 0 (no token cap).
-    let daily_token_budget: i64 = if course.daily_cost_limit_usd > rust_decimal::Decimal::ZERO {
-        match billing_rates {
-            Some((in_rate, out_rate)) => {
-                let blended = (in_rate + out_rate) / rust_decimal::Decimal::from(2);
-                if blended > rust_decimal::Decimal::ZERO {
-                    use rust_decimal::prelude::ToPrimitive;
-                    ((course.daily_cost_limit_usd * rust_decimal::Decimal::from(1_000_000))
-                        / blended)
-                        .to_i64()
-                        .unwrap_or(i64::MAX)
-                } else {
-                    0
-                }
-            }
-            None => {
-                // The course has a USD cap but its selected model is
-                // unpriced (NULL rate or absent from the catalog), so spend
-                // bills at $0 and the per-response token fail-safe is
-                // disabled. The enable-gate + price CHECK make this
-                // unreachable in steady state; it only happens when an admin
-                // has force-migrated the course onto a disabled, un-priced
-                // model. Surface it rather than running silently uncapped.
-                tracing::warn!(
-                    "course {} has a daily USD cap but model '{}' is unpriced; spend bills at $0 and the per-response token cap is disabled",
-                    workspace_id,
-                    course.model,
-                );
-                0
-            }
-        }
-    } else {
-        0
-    };
-
-    let workspace_kind =
-        minerva_core::models::WorkspaceKind::parse(&course.kind).ok_or_else(|| {
-            AppError::Internal(format!("workspace {workspace_id} has kind {}", course.kind))
-        })?;
-    // A credit transfer workspace answers every turn itself; see
-    // `strategy::run_strategy`. Course workspaces keep their configured
-    // strategy.
-    let rulebook_documents = if workspace_kind
-        == minerva_core::models::WorkspaceKind::CreditTransfer
-    {
-        minerva_db::queries::credit_transfer::rulebook_documents(&state.db, workspace_id).await?
-    } else {
-        Vec::new()
-    };
-
-    let ctx = strategy::GenerationContext {
-        course_name: course.name,
-        custom_prompt: course.system_prompt,
-        model: course.model,
-        temperature: course.temperature,
-        max_chunks: course.max_chunks,
-        min_score: course.min_score,
-        workspace_id,
-        conversation_id: conv_id,
-        user_id: conv.user_id,
-        provider,
-        fallback_routes,
-        chat_api_key,
-        chat_base_url,
-        utility: state.utility_model().await,
-        openai_api_key: state.config.openai_api_key.clone(),
-        embedding_provider: course.embedding_provider,
-        embedding_model: course.embedding_model,
-        embedding_version: course.embedding_version,
-        history,
-        carryover: conv.carryover_summary.clone(),
-        workspace_kind,
-        rulebook_documents,
-        corpus: None,
-        user_content,
-        is_first_message,
-        daily_token_budget,
-        billing_rates,
-        db: state.db.clone(),
-        qdrant: Arc::clone(&state.qdrant),
-        fastembed: Arc::clone(&state.fastembed),
-        reranker: Arc::clone(&state.reranker),
-        reranker_model: course.reranker_model,
-        reranking_enabled,
-        kg_enabled,
-        tool_use_enabled: course.tool_use_enabled,
-        viewer_is_teacher,
-    };
-
-    // A credit transfer workspace reads its plan and rule corpus once per
-    // turn, before the stream opens, so the prompt, the reply and the check
-    // of that reply all see the same text.
-    let mut ctx = ctx;
-    if workspace_kind == minerva_core::models::WorkspaceKind::CreditTransfer {
-        ctx.corpus = Some(
-            strategy::credit_transfer::prepare(&ctx)
-                .await
-                .map_err(AppError::Internal)?,
-        );
     }
 
     tokio::spawn(async move {
@@ -2446,19 +2465,19 @@ async fn embed_topic_turns(
 /// a wrong nudge is worse than a missing one.
 fn spawn_topic_switch_detection(
     state: &AppState,
-    course: &minerva_db::queries::workspaces::WorkspaceRow,
-    conversation_id: Uuid,
+    ctx: &strategy::GenerationContext,
     message_id: Uuid,
-    content: String,
 ) {
     use minerva_app_core::classification::topic_switch as ts;
 
     let state = state.clone();
-    let workspace_id = course.id;
-    let embedding_provider = course.embedding_provider.clone();
-    let embedding_model = course.embedding_model.clone();
-    let embedding_version = course.embedding_version;
-    let threshold = ts::similarity_threshold(course.min_score);
+    let conversation_id = ctx.conversation_id;
+    let content = ctx.user_content.clone();
+    let workspace_id = ctx.workspace_id;
+    let embedding_provider = ctx.embedding_provider.clone();
+    let embedding_model = ctx.embedding_model.clone();
+    let embedding_version = ctx.embedding_version;
+    let threshold = ts::similarity_threshold(ctx.min_score);
 
     tokio::spawn(async move {
         // Same dispatch and query-side prefix as retrieval

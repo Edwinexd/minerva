@@ -13,6 +13,10 @@ on:
         description: "Image tag to deploy (e.g. master, sha-abc1234, v1.0.0)"
         required: false
         default: "latest"
+      allow_secret_removal:
+        description: "Secret keys this deploy may empty or remove (comma-separated, e.g. MISTRAL_API_KEY). Leave empty unless that is intended."
+        required: false
+        default: ""
 
 # Production deploys share a single WireGuard/SSH tunnel path to the cluster.
 # Never let workflow_run/manual/dispatch deployments use it concurrently. Keep
@@ -105,6 +109,20 @@ jobs:
       - name: Create k8s secrets file
         run: |
           echo "${{ secrets.K8S_SECRETS }}" | base64 -d > k8s/overlays/prod/secrets.yaml
+
+      - name: Refuse to drop secret keys
+        # Every deploy re-applies the whole K8S_SECRETS, so a key set on the
+        # cluster but missing from Terraform's output would be wiped and its
+        # feature switched off silently. Fails unless the key is named in
+        # the allow_secret_removal input. Prints key names only.
+        env:
+          ALLOW_SECRET_REMOVAL: ${{ github.event.inputs.allow_secret_removal || '' }}
+        run: |
+          kubectl create --dry-run=client --validate=false -o json -f k8s/overlays/prod/secrets.yaml > "$RUNNER_TEMP/new-secrets.json"
+          names=$(jq -r '(.items // [.])[] | select(.kind == "Secret") | .metadata.name' "$RUNNER_TEMP/new-secrets.json")
+          kubectl get secret $names -n minerva -o json --ignore-not-found > "$RUNNER_TEMP/live-secrets.json"
+          python3 scripts/check_secret_removal.py "$RUNNER_TEMP/new-secrets.json" "$RUNNER_TEMP/live-secrets.json" --allow "$ALLOW_SECRET_REMOVAL"
+          rm -f "$RUNNER_TEMP/new-secrets.json" "$RUNNER_TEMP/live-secrets.json"
 
       - name: Deploy to Kubernetes
         # Roll-out order: data layer first (postgres + qdrant must be
